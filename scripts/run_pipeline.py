@@ -23,7 +23,9 @@ def parse_args():
         "-c",
         "--config",
         type=str,
-        default="g1",
+        default="g1_beyondmimic",
+        # RlPipeline: g1 | g1_beyondmimic | g1_asap | g1_real
+        # RlLocoMimicPipeline: g1_locomimic_beyondmimic | g1_locomimic_asap
         help="Name of the config class to use",
     )
     args = parser.parse_args()
@@ -38,6 +40,13 @@ def main():
     cfg: RlPipelineCfg = config_manager.get_cfg()
 
     pipeline_type = cfg.pipeline_type
+
+    # print("\n")
+    # print(f"pipeline_type: {pipeline_type}")
+    # print("\n")
+    
+    # temp = 1
+    # assert temp == 2
 
     pipeline_class: type[RlPipeline] = getattr(robojudo.pipeline, pipeline_type)
     logger.info(f"Using pipeline: {pipeline_type} -> {pipeline_class}")

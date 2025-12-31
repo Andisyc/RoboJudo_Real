@@ -65,10 +65,10 @@ class g1_real(g1):
 
     # env: G1DummyEnvCfg = G1DummyEnvCfg()
     env: G1RealEnvCfg = G1RealEnvCfg(
-        # env_type="UnitreeEnv",  # For unitree_sdk2py
-        env_type="UnitreeCppEnv",  # For unitree_cpp, check README for more details
+        env_type="UnitreeEnv",  # For unitree_sdk2py
+        # env_type="UnitreeCppEnv",  # For unitree_cpp, check README for more details
         unitree=G1UnitreeCfg(
-            net_if="eth0",  # note: change to your network interface
+            net_if="enp211s0f1np1",  # note: change to your network interface
         ),
     )
 

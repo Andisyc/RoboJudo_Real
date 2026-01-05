@@ -187,22 +187,31 @@ class RlPipeline(Pipeline):
 
         # logger.info(f"{current_motor_angle=}")
 
-        traj_len = 1000
+        traj_len = 1000 # total 1k step
         last_step_time = time.time()
         logger.warning("prepare_init")
         pbar = ProgressBar("Prepare", traj_len)
 
+        # iterate compute & update joint angle
         for t in range(traj_len):
+            # get current joint angle from motor
             current_motor_angle = np.array(self.env.dof_pos)
 
+            # inside 300 step current mixup with desire angle
+            # after 300 step domanite by desire joint angle
             blend_ratio = np.minimum(t / 300, 1)
+
+            # compute mixup action with current and desire angle
             action = (1 - blend_ratio) * current_motor_angle + blend_ratio * desired_motor_angle
 
-            # warm up network
+            # forward propagation but abandon action
+            # fill in history buffer, warm up network
             self.step(dry_run=True)
 
+            # send motor mixup action
             self.env.step(action)
 
+            # compute period, sleep if too fast, error if too slow
             time_diff = last_step_time + self.dt - time.time()
             if time_diff > 0:
                 time.sleep(time_diff)
@@ -211,6 +220,8 @@ class RlPipeline(Pipeline):
             last_step_time = time.time()
             pbar.update()
 
+            # reset obs, policy, ctrl buffer at 900 steps
+            # since at 900 steps robot already reach init state
             if t == 0.9 * traj_len:
                 logger.info(f"{'=' * 10} RESET ZERO POSITION {'=' * 10}")
                 self.reset()

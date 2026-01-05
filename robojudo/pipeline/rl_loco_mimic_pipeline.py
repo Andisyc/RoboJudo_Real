@@ -53,26 +53,24 @@ class PolicyInterpManager(PolicyManager):
         self.interp_callback_start = None
         self.interp_callback_end = None
 
+        # buffer loco policy joint angle after mimic
         self.loco_dof_pos = loco_dof_pos if loco_dof_pos is not None else self.env.default_pos.copy()
         self.override_dof_pos = self.loco_dof_pos.copy()
 
-    def _interpolate_init(
-        self,
-        get_target_pos: Callable[[], np.ndarray],
-        durations: list[int],
-        callback_start=None,
-        callback_end=None,
-    ):
-        self.interp_get_target_pos = get_target_pos
-        self.interp_durations = durations
+    def _interpolate_init(self, get_target_pos: Callable[[], np.ndarray], durations: list[int],
+                          callback_start=None, callback_end=None):
+        self.interp_get_target_pos = get_target_pos # the end joint angle of transition
+        self.interp_durations = durations # transition steps
         self.interp_callback_start = callback_start
         self.interp_callback_end = callback_end
         self.interp_pbar = ProgressBar("Interpolation", durations[1])
 
         self.interp_state = self.InterpState.START
-        # Starting Tasks
+
+        # Starting Tasks: after durations[0] step execute start
         self.timer.add(self._interpolate_start, delay_steps=durations[0])
-        # Ending Tasks
+
+        # Ending Tasks: after durations[3] step execute end
         self.timer.add(self._interpolate_end, delay_steps=sum(durations) + 1)
 
     def _interpolate_start(self):
@@ -119,7 +117,7 @@ class PolicyInterpManager(PolicyManager):
         else:
             self.interp_state = self.InterpState.END
 
-    def toggle_mimic_policy(self, delta: int):
+    def toggle_mimic_policy(self, delta: int): # swich mimic policy
         # only switch mimic policy if current policy is locomotion
         if self.current_policy_id != self.policy_loco_id:
             logger.warning("Cannot switch mimic policy when policy is mimic.")

@@ -31,22 +31,19 @@ class PolicyInterpManager(PolicyManager):
     # interpolate frames: mimic -> loco
     DURATIONS_MIMIC_LOCO = [25, 75, 0]  # [start, in-progress, end] in steps
 
-    def __init__(
-        self,
-        cfg_policy_loco: PolicyCfg,
-        cfg_policies: list[PolicyCfg],
-        env: Environment,
-        loco_dof_pos: np.ndarray | None = None,
-        device: str = "cpu",
-    ):
+    def __init__(self, cfg_policy_loco: PolicyCfg, cfg_policies: list[PolicyCfg], env: Environment, 
+                 loco_dof_pos: np.ndarray | None = None, device: str = "cpu"):
+        # set loco policy as 0th
         cfg_policies_all = [cfg_policy_loco] + cfg_policies
         super().__init__(cfg_policies_all, env, device)
 
+        # set current 0th to loco
         self.policy_loco_id = 0
+
         self.policy_mimic_num = len(cfg_policies)
         assert self.policy_mimic_num > 0, "At least one mimic policy is required for switching."
         self.policy_mimic_ids = list(range(1, self.policy_mimic_num + 1))
-        self.policy_mimic_idx = 0
+        self.policy_mimic_idx = 0 # set chosen mimic policy as 0th
 
         # Interpolation variables
         self.interp_state = self.InterpState.IDLE

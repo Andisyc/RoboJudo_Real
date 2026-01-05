@@ -16,12 +16,7 @@ logger = logging.getLogger(__name__)
 class PolicyManager:
     DELAY_STEPS_SWITCH: int = 10  # steps to wait before switching policy
 
-    def __init__(
-        self,
-        cfg_policies: list[PolicyCfg],
-        env: Environment,
-        device: str = "cpu",
-    ):
+    def __init__(self, cfg_policies: list[PolicyCfg], env: Environment, device: str = "cpu"):
         self.env = env
         self.device = device
 
@@ -93,19 +88,25 @@ class RlMultiPolicyPipeline(RlPipeline):
         # Skip RlPipeline initialization
         Pipeline.__init__(self, cfg=cfg)
 
+        # load in environment (unitree or dummy)
         env_class: type[Environment] = getattr(robojudo.environment, self.cfg.env.env_type)
         self.env: Environment = env_class(cfg_env=self.cfg.env, device=self.device)
 
+        # load in controller (keyboard or joystick)
         self.ctrl_manager = CtrlManager(cfg_ctrls=self.cfg.ctrl, env=self.env, device=self.device)
 
+        # load in policy (for obs & action)
         self.policy_manager = PolicyManager(
             cfg_policies=self.cfg.policies,
             env=self.env,
             device=self.device,)
         
+        # load in dof_cfg & mujoco
+        # (dummy & unitree visualizer=None)
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
         self.visualizer = self.env.visualizer
 
+        # load in freq & cycle
         self.freq = self.cfg.policies[0].freq
         self.dt = 1.0 / self.freq
 

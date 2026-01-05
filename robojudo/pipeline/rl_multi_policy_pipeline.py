@@ -101,8 +101,8 @@ class RlMultiPolicyPipeline(RlPipeline):
         self.policy_manager = PolicyManager(
             cfg_policies=self.cfg.policies,
             env=self.env,
-            device=self.device,
-        )
+            device=self.device,)
+        
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
         self.visualizer = self.env.visualizer
 
@@ -155,8 +155,7 @@ class RlMultiPolicyPipeline(RlPipeline):
                 ctrl_data=ctrl_data,
                 extras=extras,
                 pd_target=pd_target,
-                timestep=self.timestep,
-            )
+                timestep=self.timestep,)
 
     def step(self, dry_run=False):
         self.env.update()

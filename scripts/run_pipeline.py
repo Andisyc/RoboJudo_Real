@@ -41,13 +41,6 @@ def main():
 
     pipeline_type = cfg.pipeline_type
 
-    # print("\n")
-    # print(f"pipeline_type: {pipeline_type}")
-    # print("\n")
-    
-    # temp = 1
-    # assert temp == 2
-
     pipeline_class: type[RlPipeline] = getattr(robojudo.pipeline, pipeline_type)
     logger.info(f"Using pipeline: {pipeline_type} -> {pipeline_class}")
 

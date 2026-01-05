@@ -121,11 +121,13 @@ class PolicyInterpManager(PolicyManager):
         if self.interp_pbar:
             self.interp_pbar.set(self.interp_timestep)
 
-        # compute 
+        # compute progress (0 -> 1)
         progress = self.interp_timestep / self.interp_durations[1]
-        alpha = min(progress, 1.0)
+
+        alpha = min(progress, 1.0) # compute current mixup pos with progress & mixup coef
         self.override_dof_pos = (1 - alpha) * self.interp_start_pos + alpha * self.interp_target_pos
 
+        # update interp time step
         if self.interp_timestep < self.interp_durations[1]:
             self.interp_timestep += 1
         else:

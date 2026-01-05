@@ -43,7 +43,7 @@ class PolicyInterpManager(PolicyManager):
         self.policy_mimic_num = len(cfg_policies)
         assert self.policy_mimic_num > 0, "At least one mimic policy is required for switching."
         self.policy_mimic_ids = list(range(1, self.policy_mimic_num + 1))
-        self.policy_mimic_idx = 0 # set chosen mimic policy as 0th
+        self.policy_mimic_idx = 0 # init chosen mimic policy index (from the top)
 
         # Interpolation variables
         self.interp_state = self.InterpState.IDLE
@@ -133,8 +133,9 @@ class PolicyInterpManager(PolicyManager):
         else:
             self.interp_state = self.InterpState.END
 
-    def toggle_mimic_policy(self, delta: int): # swich mimic policy
-        # only switch mimic policy if current policy is locomotion
+    def toggle_mimic_policy(self, delta: int): # loco -> mimic
+        # if current policy isn't loco then directly return
+        # current policy must be loco, then switch to mimic
         if self.current_policy_id != self.policy_loco_id:
             logger.warning("Cannot switch mimic policy when policy is mimic.")
             return
@@ -144,25 +145,33 @@ class PolicyInterpManager(PolicyManager):
         policy_name = self.policy_by_id(policy_id).name
         logger.info(f"Switch mimic policy to {self.policy_mimic_idx}: {policy_name}")
 
-    def switch_to_loco(self):
+    def switch_to_loco(self): # mimic -> loco
+        # if current policy is loco then directly return
+        # current policy must be mimic, then switch to loco
         if self.current_policy_id == self.policy_loco_id and self.interp_state == self.InterpState.IDLE:
             logger.warning("Already in locomotion policy.")
             return
+
         if self.current_policy_id != self.policy_loco_id:
             self.policy_by_id(self.policy_loco_id).reset()
             self.warmup_policy_indices.add(self.policy_loco_id)
+        
         self._interpolate_init(
             get_target_pos=lambda: self.loco_dof_pos,
             durations=self.DURATIONS_MIMIC_LOCO,
             callback_start=lambda: self.set_policy(self.policy_loco_id),)
 
-    def switch_to_mimic(self):
+    def switch_to_mimic(self): # loco -> mimic
+        # if current policy isn't loco then directly return
+        # current policy must be loco, then switch to mimic
         if self.current_policy_id != self.policy_loco_id:
             logger.warning("Already in mimic policy.")
             return
+
         policy_mimic_id = self.policy_mimic_ids[self.policy_mimic_idx]
         self.policy_by_id(policy_mimic_id).reset()
         self.warmup_policy_indices.add(policy_mimic_id)
+
         self._interpolate_init(
             get_target_pos=lambda: self.policy_by_id(policy_mimic_id).get_init_dof_pos(),
             durations=self.DURATIONS_LOCO_MIMIC,
@@ -205,20 +214,24 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         else:
             self.override_dof_indices = list(range(-self.num_upper_body_dof, 0))
 
+        # load in policy (for obs & action)
         self.policy_manager = PolicyInterpManager(
             cfg_policy_loco=self.cfg.loco_policy,
             cfg_policies=self.cfg.mimic_policies,
             env=self.env,
             loco_dof_pos=self.loco_dof_pos,
-            device=self.device,
-        )
+            device=self.device,)
+        
+        # load in dof_cfg & mujoco
+        # (dummy & unitree visualizer=None)
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
         self.visualizer = self.env.visualizer
 
+        # load in freq & cycle
         self.freq = self.cfg.loco_policy.freq
         self.dt = 1.0 / self.freq
 
-        self.policy_locomotion_mimic_flag = 0  # 0: locomotion, 1: mimic
+        self.policy_locomotion_mimic_flag = 0 # 0: locomotion, 1: mimic
 
         self.self_check()
         self.reset()

@@ -175,27 +175,32 @@ class BeyondMimicPolicy(Policy):
         lin_vel = env_data.base_lin_vel
 
         command, robot_anchor_pos_w, robot_anchor_quat_w, anchor_pos_w, anchor_quat_w, hand_pose = self._get_command(
-            env_data, ctrl_data
-        )
+            env_data, ctrl_data)
 
+        # subtract_frame_transforms compute 
+        # relative transform between frames
         pos, ori = subtract_frame_transforms(
             robot_anchor_pos_w,
             robot_anchor_quat_w,
             anchor_pos_w,
-            anchor_quat_w,
-        )
+            anchor_quat_w,)
+        
+        # matrix_from_quat transform pose 
+        # to matrix for kinematic computation
         mat = matrix_from_quat(ori)
 
         obs_command = command
         obs_motion_anchor_pos_b = pos
         obs_motion_anchor_ori_b = mat[:, :2].flatten()
 
+        # prepare obs (proprioception)
         obs_base_lin_vel = lin_vel
         obs_base_ang_vel = ang_vel
         obs_joint_pos_rel = dof_pos - self.default_dof_pos
         obs_joint_vel_rel = dof_vel
         obs_last_action = self.last_action
 
+        # concat obs (proprioception)
         obs_prop = np.concatenate(
             [
                 obs_command,
@@ -206,11 +211,11 @@ class BeyondMimicPolicy(Policy):
                 obs_joint_pos_rel,
                 obs_joint_vel_rel,
                 obs_last_action,
-            ]
-        )
+            ])
 
-        obs = obs_prop
-        extras = {
+        # ready to return
+        obs = obs_prop # local frame
+        extras = { # world frame
             "pos": pos,
             "ori": ori,
             "robot_anchor_pos_w": robot_anchor_pos_w,
@@ -219,8 +224,8 @@ class BeyondMimicPolicy(Policy):
             "anchor_quat_w": anchor_quat_w,
             "command": command,
             "hand_pose": hand_pose,
-            "CALLBACK": ["[MOTION_DONE]"] if self.flag_motion_done else [],
-        }
+            "CALLBACK": ["[MOTION_DONE]"] if self.flag_motion_done else [],}
+        
         return obs, extras
 
     def get_action(self, obs: np.ndarray) -> np.ndarray:

@@ -270,7 +270,7 @@ class UnitreeEnv(Environment):
             if self.born_place_align:
                 self._base_pos = self.base_align.align_pos(base_pos)
 
-        # FK
+        # FK (Forward Kinematics)
         if self.update_with_fk:
             fk_info = self.fk()
             self._torso_pos = fk_info[self._torso_name]["pos"]

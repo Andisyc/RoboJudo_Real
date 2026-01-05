@@ -51,11 +51,14 @@ def main():
     pipeline_class: type[RlPipeline] = getattr(robojudo.pipeline, pipeline_type)
     logger.info(f"Using pipeline: {pipeline_type} -> {pipeline_class}")
 
+    # choice pipeline instance
     pipeline = pipeline_class(cfg=cfg)
 
+    # if mujoco = False
     if not cfg.env.is_sim:
         pipeline.prepare()
 
+    # continue execute step
     while True:
         time_start = time.time()
         pipeline.step()

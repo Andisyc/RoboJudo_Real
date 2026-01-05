@@ -68,20 +68,26 @@ class RlPipeline(Pipeline):
     def __init__(self, cfg: RlPipelineCfg):
         super().__init__(cfg=cfg)
 
+        # load in environment (unitree or dummy)
         env_class: type[Environment] = getattr(robojudo.environment, self.cfg.env.env_type)
         self.env: Environment = env_class(cfg_env=self.cfg.env, device=self.device)
 
+        # load in controller (keyboard or joystick)
         self.ctrl_manager = CtrlManager(cfg_ctrls=self.cfg.ctrl, env=self.env, device=self.device)
 
+        # load in policy (for obs & action)
         self.policy = PolicyWrapper(
             cfg_policy=self.cfg.policy,
             env_dof_cfg=self.env.dof_cfg,
             device=self.device,
         )
 
+        # load in dof_cfg & mujoco
+        # (dummy & unitree visualizer=None)
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
         self.visualizer = self.env.visualizer
 
+        # load in freq & cycle
         self.freq = self.cfg.policy.freq
         self.dt = 1.0 / self.freq
 
@@ -144,11 +150,14 @@ class RlPipeline(Pipeline):
             )
 
     def step(self, dry_run=False):
+        # update [dof, odo, FK, con]
         self.env.update()
+
+        # get proprioception
         env_data = self.env.get_data()
 
+        # get controll command
         ctrl_data = self.ctrl_manager.get_ctrl_data(env_data)
-
         commands = ctrl_data.get("COMMANDS", [])
         if len(commands) > 0:
             logger.info(f"{'=' * 10} COMMANDS {'=' * 10}\n{commands}")

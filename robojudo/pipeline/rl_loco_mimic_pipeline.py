@@ -76,13 +76,21 @@ class PolicyInterpManager(PolicyManager):
     def _interpolate_start(self):
         if self.interp_state != self.InterpState.START:
             return
+        
+        # output interp start callback to terminal
         if self.interp_callback_start is not None:
             self.interp_callback_start()
             self.interp_callback_start = None
 
+        # buffer start pos: current joint angle
         self.interp_start_pos = self.env.dof_pos.copy()
+
+        # buffer end pos: target joint angle
         self.interp_target_pos = self.interp_get_target_pos()
+
+        # set up time step
         self.interp_timestep = 0
+
         self.interp_state = self.InterpState.IN_PROGRESS
 
         # logger.debug("Interpolation started.")
@@ -90,13 +98,18 @@ class PolicyInterpManager(PolicyManager):
     def _interpolate_end(self):
         if self.interp_state != self.InterpState.END:
             return
+        
+        # force target pos as the interp end pos
         self.override_dof_pos = self.interp_target_pos.copy()
         if self.interp_pbar:
             self.interp_pbar.close()
             self.interp_pbar = None
+        
+        # output interp end callback to terminal
         if self.interp_callback_end is not None:
             self.interp_callback_end()
             self.interp_callback_end = None
+        
         self.interp_state = self.InterpState.IDLE
 
         # logger.debug("Interpolation ended.")
@@ -108,6 +121,7 @@ class PolicyInterpManager(PolicyManager):
         if self.interp_pbar:
             self.interp_pbar.set(self.interp_timestep)
 
+        # compute 
         progress = self.interp_timestep / self.interp_durations[1]
         alpha = min(progress, 1.0)
         self.override_dof_pos = (1 - alpha) * self.interp_start_pos + alpha * self.interp_target_pos

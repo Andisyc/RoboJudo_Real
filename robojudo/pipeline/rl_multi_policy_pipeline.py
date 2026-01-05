@@ -158,22 +158,30 @@ class RlMultiPolicyPipeline(RlPipeline):
                 timestep=self.timestep,)
 
     def step(self, dry_run=False):
+        # update [dof, odo, FK, con]
         self.env.update()
-        env_data = self.env.get_data()
-        ctrl_data = self.ctrl_manager.get_ctrl_data(env_data)
 
+        # get proprioception
+        env_data = self.env.get_data()
+
+        # get control command
+        ctrl_data = self.ctrl_manager.get_ctrl_data(env_data)
         commands = ctrl_data.get("COMMANDS", [])
         if len(commands) > 0:
             logger.info(f"{'=' * 10} COMMANDS {'=' * 10}\n{commands}")
 
+        # get obs for policy & ext for mujoco
         obs, extras = self.policy.get_observation(env_data, ctrl_data)
 
+        # forward propagation for PD signal
         pd_target = self.policy.get_pd_target(obs)
 
+        # if not dummy_env update obs info
         if not dry_run:
             self.env.step(pd_target, extras.get("hand_pose", None))
             # logger.debug(pd_target)
 
+        # output callback info to terminal
         self.post_step_callback(env_data, ctrl_data, extras, pd_target)
 
 

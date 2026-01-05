@@ -79,9 +79,8 @@ class RlPipeline(Pipeline):
         self.policy = PolicyWrapper(
             cfg_policy=self.cfg.policy,
             env_dof_cfg=self.env.dof_cfg,
-            device=self.device,
-        )
-
+            device=self.device,)
+        
         # load in dof_cfg & mujoco
         # (dummy & unitree visualizer=None)
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
@@ -146,8 +145,7 @@ class RlPipeline(Pipeline):
                 ctrl_data=ctrl_data,
                 extras=extras,
                 pd_target=pd_target,
-                timestep=self.timestep,
-            )
+                timestep=self.timestep,)
 
     def step(self, dry_run=False):
         # update [dof, odo, FK, con]
@@ -172,16 +170,21 @@ class RlPipeline(Pipeline):
         if not dry_run:
             self.env.step(pd_target, extras.get("hand_pose", None))
 
+        # output callback info to terminal
         self.post_step_callback(env_data, ctrl_data, extras, pd_target)
 
     def prepare(self, init_motor_angle=None):
+        # get init dof pos from policy
         if init_motor_angle is not None:
             desired_motor_angle = init_motor_angle
         else:
             desired_motor_angle = self.policy.get_init_dof_pos()
 
         # logger.info(f"{desired_motor_angle=}")
+
+        # self.env.dof_pos is an interface func
         current_motor_angle = np.array(self.env.dof_pos)
+
         # logger.info(f"{current_motor_angle=}")
 
         traj_len = 1000

@@ -171,8 +171,8 @@ class BeyondMimicPolicy(Policy):
     def get_observation(self, env_data, ctrl_data):
         dof_pos = env_data.dof_pos
         dof_vel = env_data.dof_vel
-        ang_vel = env_data.base_ang_vel
-        lin_vel = env_data.base_lin_vel
+        ang_vel = env_data.base_ang_vel # root ang vel
+        lin_vel = env_data.base_lin_vel # root lin vel
 
         command, robot_anchor_pos_w, robot_anchor_quat_w, anchor_pos_w, anchor_quat_w, hand_pose = self._get_command(
             env_data, ctrl_data)
@@ -214,15 +214,15 @@ class BeyondMimicPolicy(Policy):
             ])
 
         # ready to return
-        obs = obs_prop # local frame
-        extras = { # world frame
-            "pos": pos,
-            "ori": ori,
-            "robot_anchor_pos_w": robot_anchor_pos_w,
-            "robot_anchor_quat_w": robot_anchor_quat_w,
-            "anchor_pos_w": anchor_pos_w,
-            "anchor_quat_w": anchor_quat_w,
-            "command": command,
+        obs = obs_prop # local frame (for policy)
+        extras = { # world frame (for mujoco)
+            "pos": pos, # displace vector
+            "ori": ori, # quaternion
+            "robot_anchor_pos_w": robot_anchor_pos_w, # mujoco arrow
+            "robot_anchor_quat_w": robot_anchor_quat_w, # mujoco arrow
+            "anchor_pos_w": anchor_pos_w, # ref motion world frame
+            "anchor_quat_w": anchor_quat_w, # ref motion world frame
+            "command": command, # original command
             "hand_pose": hand_pose,
             "CALLBACK": ["[MOTION_DONE]"] if self.flag_motion_done else [],}
         

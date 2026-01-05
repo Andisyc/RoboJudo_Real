@@ -16,15 +16,19 @@ from robojudo.utils.progress import ProgressBar
 
 logger = logging.getLogger(__name__)
 
-
+# policy interpolate manager (handcraft transition)
 class PolicyInterpManager(PolicyManager):
+    # define states of FSM
     class InterpState(Enum):
         IDLE = auto()
         START = auto()
         IN_PROGRESS = auto()
         END = auto()
 
+    # interpolate frames: loco -> mimic
     DURATIONS_LOCO_MIMIC = [0, 75, 25]  # [start, in-progress, end] in steps
+
+    # interpolate frames: mimic -> loco
     DURATIONS_MIMIC_LOCO = [25, 75, 0]  # [start, in-progress, end] in steps
 
     def __init__(
@@ -139,8 +143,7 @@ class PolicyInterpManager(PolicyManager):
         self._interpolate_init(
             get_target_pos=lambda: self.loco_dof_pos,
             durations=self.DURATIONS_MIMIC_LOCO,
-            callback_start=lambda: self.set_policy(self.policy_loco_id),
-        )
+            callback_start=lambda: self.set_policy(self.policy_loco_id),)
 
     def switch_to_mimic(self):
         if self.current_policy_id != self.policy_loco_id:
@@ -152,8 +155,7 @@ class PolicyInterpManager(PolicyManager):
         self._interpolate_init(
             get_target_pos=lambda: self.policy_by_id(policy_mimic_id).get_init_dof_pos(),
             durations=self.DURATIONS_LOCO_MIMIC,
-            callback_end=lambda: self.set_policy(policy_mimic_id),
-        )
+            callback_end=lambda: self.set_policy(policy_mimic_id),)
 
     def step(self, env_data, ctrl_data):
         super().step(env_data, ctrl_data)
@@ -172,9 +174,11 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         # Skip RlMultiPolicyPipeline initialization
         Pipeline.__init__(self, cfg=cfg)
 
+        # load in environment (unitree or dummy)
         env_class: type[Environment] = getattr(robojudo.environment, self.cfg.env.env_type)
         self.env: Environment = env_class(cfg_env=self.cfg.env, device=self.device)
 
+        # load in controller (keyboard or joystick)
         self.ctrl_manager = CtrlManager(cfg_ctrls=self.cfg.ctrl, env=self.env, device=self.device)
 
         # upper body override
@@ -263,30 +267,41 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
             )
 
     def step(self, dry_run=False):
+        # update [dof, odo, FK, con]
         self.env.update()
-        env_data = self.env.get_data()
-        ctrl_data = self.ctrl_manager.get_ctrl_data(env_data)
 
+        # get proprioception
+        env_data = self.env.get_data()
+
+        # get control command
+        ctrl_data = self.ctrl_manager.get_ctrl_data(env_data)
         commands = ctrl_data.get("COMMANDS", [])
         if len(commands) > 0:
             logger.info(f"{'=' * 10} COMMANDS {'=' * 10}\n{commands}")
 
+        # 
         if self.policy_manager.current_policy_id == self.policy_manager.policy_loco_id:
             ctrl_data["ref_dof_pos"] = self.policy.obs_adapter.fit(self.policy_manager.override_dof_pos)
 
+        # get obs for policy & ext for mujoco
         obs, extras = self.policy.get_observation(env_data, ctrl_data)
 
+        # forward propagation for PD signal
         pd_target = self.policy.get_pd_target(obs)
 
+        # 
         if self.policy_manager.current_policy_id == self.policy_manager.policy_loco_id:
             pd_target[self.override_dof_indices] = self.policy_manager.override_dof_pos[self.override_dof_indices]
 
+        # if not dummy_env update obs info
         if not dry_run:
             self.env.step(pd_target, extras.get("hand_pose", None))
             # logger.debug(pd_target)
 
+        # output callback info to terminal
         self.post_step_callback(env_data, ctrl_data, extras, pd_target)
 
+    # invoke prepare() from RlPipeline
     def prepare(self):
         init_motor_angle = self.loco_dof_pos.copy()
         super().prepare(init_motor_angle=init_motor_angle)

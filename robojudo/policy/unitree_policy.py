@@ -149,6 +149,7 @@ class UnitreeWoGaitPolicy(UnitreePolicy):
     def reset(self):
         self.timestep: int = 0
 
+        # init history obs buffer
         history_obs_dims = self.cfg_policy.history_obs_dims
         default_history = [np.zeros(dim, dtype=np.float32) for dim in history_obs_dims.values()]
         self._init_history(default_history)
@@ -156,6 +157,7 @@ class UnitreeWoGaitPolicy(UnitreePolicy):
     def get_observation(self, env_data, ctrl_data):
         commands = self._get_commands(ctrl_data)
 
+        # compute gravity vector projection
         gravity_orientation = get_gravity_orientation(env_data.base_quat)
         obs_current = [
             env_data.base_ang_vel * self.obs_scales.ang_vel,
@@ -165,8 +167,10 @@ class UnitreeWoGaitPolicy(UnitreePolicy):
             env_data.dof_vel * self.obs_scales.dof_vel,
             self.last_action,]
         
+        # put obs into history buffer
         self.history_buf.append(obs_current)
 
+        # concat history obs as one vector
         history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
         obs = np.concatenate(history_list, axis=0)
 

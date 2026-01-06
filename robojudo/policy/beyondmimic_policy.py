@@ -22,6 +22,7 @@ class BeyondMimicPolicy(Policy):
         # init onnx, override dof cfg if needed
         sess_options = ort.SessionOptions()
 
+        # device select
         device = "cpu"
         if device == "cpu":
             providers = ["CPUExecutionProvider"]
@@ -32,17 +33,17 @@ class BeyondMimicPolicy(Policy):
             providers = [
                 "TensorrtExecutionProvider",
                 "CUDAExecutionProvider",
-                "CPUExecutionProvider",
-            ]
+                "CPUExecutionProvider",]
         else:
             raise ValueError(f"Unknown device: {device}")
 
+        # create inference instance (load policy to device)
         self.session = ort.InferenceSession(cfg_policy.policy_file, sess_options, providers=providers)
-
         self.input_names = [i.name for i in self.session.get_inputs()]
         self.output_names = [o.name for o in self.session.get_outputs()]
         self.motion_anchor_body_index = -1
 
+        # read dof config from .onnx
         cfg_policy_new = cfg_policy.model_copy()
         if cfg_policy_new.use_modelmeta_config:
             logger.info("[BeyondMimicPolicy] Using modelmeta as config ...")

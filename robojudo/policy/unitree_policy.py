@@ -82,13 +82,11 @@ class UnitreePolicy(Policy):
                 self.last_action,
                 sin_pos,
                 cos_pos,
-            ]
-        )
+            ])
+        
 
-        extras = {
-            "phase": phase,
-            "commands": commands,
-        }
+        extras = {"phase": phase, "commands": commands,}
+        
         return obs, extras
 
     def debug_viz(self, visualizer: MujocoVisualizer, env_data, ctrl_data, extras):
@@ -105,8 +103,8 @@ class UnitreePolicy(Policy):
             color=[1, 0, 0, 1],
             scale=2,
             horizontal_only=True,
-            id=0,
-        )
+            id=0,)
+        
         visualizer.draw_arrow(
             base_pos,
             base_quat,
@@ -114,8 +112,8 @@ class UnitreePolicy(Policy):
             color=[0, 1, 0, 1],
             scale=2,
             horizontal_only=True,
-            id=1,
-        )
+            id=1,)
+        
         visualizer.draw_arrow(
             base_pos + np.array([0.0, 0, 0.6]),
             base_quat,
@@ -123,8 +121,7 @@ class UnitreePolicy(Policy):
             color=[1, 1, 1, 1],
             scale=2,
             horizontal_only=True,
-            id=2,
-        )
+            id=2,)
 
 
 @policy_registry.register
@@ -151,14 +148,13 @@ class UnitreeWoGaitPolicy(UnitreePolicy):
             commands * self.obs_scales.command * self.max_cmd,
             (env_data.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
             env_data.dof_vel * self.obs_scales.dof_vel,
-            self.last_action,
-        ]
+            self.last_action,]
+        
         self.history_buf.append(obs_current)
 
         history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
         obs = np.concatenate(history_list, axis=0)
 
-        extras = {
-            "commands": commands,
-        }
+        extras = {"commands": commands,}
+        
         return obs, extras

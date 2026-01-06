@@ -39,17 +39,21 @@ class UnitreePolicy(Policy):
         phase = self.timestep * self.dt / cycle_time
         return phase
 
-    def _get_commands(self, ctrl_data):
+    def _get_commands(self, ctrl_data): # process cmd input
         commands = np.zeros(3)
         for key in ctrl_data.keys():
+            # process joystick input
             if key in ["JoystickCtrl", "UnitreeCtrl"]:
                 axes = ctrl_data[key]["axes"]
                 lx, ly, rx, ry = axes["LeftX"], axes["LeftY"], axes["RightX"], axes["RightY"]
 
+                # mapping joystick ctrl to vel cmd
                 commands[0] = command_remap(ly, self.commands_map[0])
                 commands[1] = command_remap(lx, self.commands_map[1])
                 commands[2] = command_remap(rx, self.commands_map[2])
                 break
+            
+            # process keyboard input
             if key in ["KeyboardCtrl"]:
                 keys = ctrl_data[key]["keyboard_event"]
                 for event in keys:
@@ -71,14 +75,18 @@ class UnitreePolicy(Policy):
                 break
         return commands
 
-    def get_observation(self, env_data, ctrl_data):
+    def get_observation(self, env_data, ctrl_data): # process obs input
         phase = self._get_phase()
         commands = self._get_commands(ctrl_data)
 
+        # compute clock signal (raise / touch)
         sin_pos = [np.sin(2 * np.pi * phase)]
         cos_pos = [np.cos(2 * np.pi * phase)]
 
+        # compute gravity vector projection
         gravity_orientation = get_gravity_orientation(env_data.base_quat)
+
+        # concat all vector as obs
         obs = np.concatenate(
             [
                 env_data.base_ang_vel * self.obs_scales.ang_vel,
@@ -91,7 +99,7 @@ class UnitreePolicy(Policy):
                 cos_pos,
             ])
         
-
+        # extras for Mujoco visualization
         extras = {"phase": phase, "commands": commands,}
         
         return obs, extras

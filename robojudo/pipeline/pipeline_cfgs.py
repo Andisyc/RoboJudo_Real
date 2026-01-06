@@ -77,14 +77,13 @@ class RlLocoMimicPipelineCfg(PipelineCfg):
             if len(self.upper_dof_pos_default) != self.upper_dof_num:
                 raise ValueError(
                     f"Length of upper_dof_pos_default ({len(self.upper_dof_pos_default)}) "
-                    f"must be equal to upper_dof_num ({self.upper_dof_num})"
-                )
+                    f"must be equal to upper_dof_num ({self.upper_dof_num})")
+        
         if self.upper_dof_override_indices is not None:
             for idx in self.upper_dof_override_indices:
                 if idx < -self.upper_dof_num or idx >= 0:
                     raise ValueError(
                         f"upper_dof_override_indices contains invalid index {idx}, "
-                        f"must be in [-{self.upper_dof_num}, 0)"
-                    )
-
+                        f"must be in [-{self.upper_dof_num}, 0)")
+        
         return self

@@ -26,8 +26,8 @@ def parse_args():
         default="g1_beyondmimic",
         # RlPipeline: g1 | g1_beyondmimic | g1_asap | g1_real
         # RlLocoMimicPipeline: g1_locomimic_beyondmimic | g1_locomimic_asap
-        help="Name of the config class to use",
-    )
+        help="Name of the config class to use",)
+    
     args = parser.parse_args()
     return args
 

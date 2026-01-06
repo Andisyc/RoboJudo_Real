@@ -125,14 +125,19 @@ class BeyondMimicPolicy(Policy):
         self._prepare_policy()
 
     def post_step_callback(self, commands: list[str] | None = None):
+        # add time step
         self.timestep += 1 * self.play_speed
+
+        # add progress bar
         if self.pbar:
             self.pbar.set(self.timestep)
 
+        # examine action completion
         if 0 < self.max_timestep <= self.timestep:
             self.play_speed = 0.0
             self.flag_motion_done = True
 
+        # process outside cmds
         for command in commands or []:
             match command:
                 case "[MOTION_RESET]":

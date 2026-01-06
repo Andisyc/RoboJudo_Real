@@ -58,6 +58,7 @@ class BeyondMimicPolicy(Policy):
             def parse_strings(s):
                 return [item for item in s.split(",")]
 
+            # resolve dof name, default pos, Kp/Kd
             dof_config = DoFConfig(
                 joint_names=parse_strings(modelmeta_dict["joint_names"]),
                 default_pos=parse_floats(modelmeta_dict["default_joint_pos"]),
@@ -66,6 +67,7 @@ class BeyondMimicPolicy(Policy):
             
             action_scales = parse_floats(modelmeta_dict["action_scale"])
 
+            # resolve anchor body point
             anchor_body_name = modelmeta_dict["anchor_body_name"]
             body_names = parse_strings(modelmeta_dict["body_names"])
             self.motion_anchor_body_index = body_names.index(anchor_body_name)
@@ -73,15 +75,22 @@ class BeyondMimicPolicy(Policy):
             # command_names = parse_strings(modelmeta_dict["command_names"])
             # observation_names = parse_strings(modelmeta_dict["observation_names"])
 
+            # update config for retargeting
             cfg_policy_new.action_dof = dof_config
             cfg_policy_new.obs_dof = dof_config
-
             cfg_policy_new.action_scales = action_scales
 
+        # init body keypoint
         super().__init__(cfg_policy=cfg_policy_new, device=device)
         self.action_scales = np.asarray(self.cfg_policy.action_scales)
+
+        # running with or without state estimator
         self.without_state_estimator = self.cfg_policy.without_state_estimator
+
+        # running with or without init anchor joint pos
         self.override_robot_anchor_pos = self.cfg_policy.override_robot_anchor_pos
+
+        # regressive (self generate next action) or teleoperate (follow outside cmd)
         self.use_motion_from_model = self.cfg_policy.use_motion_from_model
 
         self.max_timestep = self.cfg_policy.max_timestep
@@ -169,11 +178,13 @@ class BeyondMimicPolicy(Policy):
             return command, robot_anchor_pos_w, robot_anchor_quat_w, anchor_pos_w, anchor_quat_w, None
 
     def get_observation(self, env_data, ctrl_data):
+        # get proprioception
         dof_pos = env_data.dof_pos
         dof_vel = env_data.dof_vel
         ang_vel = env_data.base_ang_vel # root ang vel
         lin_vel = env_data.base_lin_vel # root lin vel
 
+        # get command from ctrl
         command, robot_anchor_pos_w, robot_anchor_quat_w, anchor_pos_w, anchor_quat_w, hand_pose = self._get_command(
             env_data, ctrl_data)
 
@@ -229,11 +240,12 @@ class BeyondMimicPolicy(Policy):
         return obs, extras
 
     def get_action(self, obs: np.ndarray) -> np.ndarray:
+        # init onnx input
         ort_inputs = {
             "obs": np.expand_dims(obs, axis=0).astype(np.float32),
             "time_step": np.expand_dims(np.array([int(self.timestep)]), axis=0).astype(np.float32),}
         
-
+        # forward propagation
         ort_outputs = self.session.run(
             [
                 "actions",
@@ -246,11 +258,14 @@ class BeyondMimicPolicy(Policy):
         
         actions: np.ndarray = np.asarray(ort_outputs[0]).squeeze()
 
+        # low pass filter (soomth action)
         actions = (1 - self.action_beta) * self.last_action + self.action_beta * actions
         self.last_action = actions.copy()
 
+        # resize action (regularization)
         scaled_actions = actions * self.action_scales
 
+        # update regressive cmd
         if self.use_motion_from_model:
             self.command = {
                 "time_step": self.timestep,

@@ -287,8 +287,7 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
                 ctrl_data=ctrl_data,
                 extras=extras,
                 pd_target=pd_target,
-                timestep=self.timestep,
-            )
+                timestep=self.timestep,)
 
     def step(self, dry_run=False):
         # update [dof, odo, FK, con]
@@ -303,7 +302,7 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         if len(commands) > 0:
             logger.info(f"{'=' * 10} COMMANDS {'=' * 10}\n{commands}")
 
-        # 
+        # if current policy is loco
         if self.policy_manager.current_policy_id == self.policy_manager.policy_loco_id:
             ctrl_data["ref_dof_pos"] = self.policy.obs_adapter.fit(self.policy_manager.override_dof_pos)
 
@@ -313,7 +312,7 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         # forward propagation for PD signal
         pd_target = self.policy.get_pd_target(obs)
 
-        # 
+        # if current policy is loco
         if self.policy_manager.current_policy_id == self.policy_manager.policy_loco_id:
             pd_target[self.override_dof_indices] = self.policy_manager.override_dof_pos[self.override_dof_indices]
 

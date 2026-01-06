@@ -98,7 +98,6 @@ class BeyondMimicPolicy(Policy):
 
             self.command_init_align = TransformAlignment(
                 quat=anchor_quat_w_init, pos=anchor_pos_w_init, yaw_only=True, xy_only=True)
-            
 
     def _prepare_policy(self):
         obs_shape = self.session.get_inputs()[0].shape  # e.g. [1, 154]

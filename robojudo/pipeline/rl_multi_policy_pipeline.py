@@ -39,7 +39,7 @@ class PolicyManager:
         return len(self.policies)
 
     @property
-    def policy(self) -> PolicyWrapper:
+    def policy(self) -> PolicyWrapper: # -> return PolicyWrapper instance
         return self.policies[self.current_policy_id]
 
     def policy_by_id(self, policy_id) -> PolicyWrapper:

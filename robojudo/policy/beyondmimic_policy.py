@@ -61,8 +61,8 @@ class BeyondMimicPolicy(Policy):
                 joint_names=parse_strings(modelmeta_dict["joint_names"]),
                 default_pos=parse_floats(modelmeta_dict["default_joint_pos"]),
                 stiffness=parse_floats(modelmeta_dict["joint_stiffness"]),
-                damping=parse_floats(modelmeta_dict["joint_damping"]),
-            )
+                damping=parse_floats(modelmeta_dict["joint_damping"]),)
+            
             action_scales = parse_floats(modelmeta_dict["action_scale"])
 
             anchor_body_name = modelmeta_dict["anchor_body_name"]
@@ -97,8 +97,8 @@ class BeyondMimicPolicy(Policy):
             anchor_quat_w_init = command_init["body_quat_w"][self.motion_anchor_body_index, :][[1, 2, 3, 0]]
 
             self.command_init_align = TransformAlignment(
-                quat=anchor_quat_w_init, pos=anchor_pos_w_init, yaw_only=True, xy_only=True
-            )
+                quat=anchor_quat_w_init, pos=anchor_pos_w_init, yaw_only=True, xy_only=True)
+            
 
     def _prepare_policy(self):
         obs_shape = self.session.get_inputs()[0].shape  # e.g. [1, 154]
@@ -145,8 +145,8 @@ class BeyondMimicPolicy(Policy):
                 command.robot_anchor_quat_w,
                 command.anchor_pos_w,
                 command.anchor_quat_w,
-                command.get("hand_pose", None),
-            )
+                command.get("hand_pose", None),)
+            
         else:
             assert self.command is not None, "command not initialized"
             # print(self.command["time_step"])
@@ -231,8 +231,8 @@ class BeyondMimicPolicy(Policy):
     def get_action(self, obs: np.ndarray) -> np.ndarray:
         ort_inputs = {
             "obs": np.expand_dims(obs, axis=0).astype(np.float32),
-            "time_step": np.expand_dims(np.array([int(self.timestep)]), axis=0).astype(np.float32),
-        }
+            "time_step": np.expand_dims(np.array([int(self.timestep)]), axis=0).astype(np.float32),}
+        
 
         ort_outputs = self.session.run(
             [
@@ -242,8 +242,8 @@ class BeyondMimicPolicy(Policy):
                 "body_pos_w",
                 "body_quat_w",
             ],
-            ort_inputs,
-        )
+            ort_inputs,)
+        
         actions: np.ndarray = np.asarray(ort_outputs[0]).squeeze()
 
         actions = (1 - self.action_beta) * self.last_action + self.action_beta * actions
@@ -257,8 +257,8 @@ class BeyondMimicPolicy(Policy):
                 "joint_pos": np.asarray(ort_outputs[1]).squeeze(),
                 "joint_vel": np.asarray(ort_outputs[2]).squeeze(),
                 "body_pos_w": np.asarray(ort_outputs[3]).squeeze(),
-                "body_quat_w": np.asarray(ort_outputs[4]).squeeze(),  # as [w, x, y, z]
-            }
+                "body_quat_w": np.asarray(ort_outputs[4]).squeeze(),}  # as [w, x, y, z]
+            
         return scaled_actions
 
     def get_init_dof_pos(self) -> np.ndarray:
@@ -287,8 +287,8 @@ class BeyondMimicPolicy(Policy):
             [0.2, 0, 0],
             color=[0, 1, 0, 1],
             scale=2,
-            id=1,
-        )
+            id=1,)
+        
         visualizer.draw_arrow(robot_anchor_pos_w, robot_anchor_quat_w, pos, color=[0, 1, 1, 1], scale=2, id=2)
 
         torso_pos = env_data["torso_pos"]

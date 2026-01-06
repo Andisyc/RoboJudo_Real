@@ -13,8 +13,13 @@ class UnitreePolicy(Policy):
     def __init__(self, cfg_policy, device):
         super().__init__(cfg_policy=cfg_policy, device=device)
 
+        # load in obs scale coef
         self.obs_scales = self.cfg_policy.obs_scales
+
+        # load in maximum cmd range
         self.max_cmd = self.cfg_policy.max_cmd
+
+        # load in cmd mapping (joystick / keyboard)
         self.commands_map = self.cfg_policy.commands_map
 
         self.reset()
@@ -29,6 +34,8 @@ class UnitreePolicy(Policy):
 
     def _get_phase(self):
         cycle_time = 0.8
+
+        # compute current phase
         phase = self.timestep * self.dt / cycle_time
         return phase
 

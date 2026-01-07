@@ -46,9 +46,9 @@ from .policy.g1_unitree_policy_cfg import (
 
 # ======================== Basic Configs ======================== #
 @cfg_registry.register
-class g1(RlPipelineCfg):
+class g1(RlPipelineCfg): # Sim2Sim
     """
-    Unitree G1 robot configuration, Unitree Policy, Sim2Sim.
+    Unitree G1 robot configuration, Unitree Policy.
     You can modify to play with other policies and controllers.
     """
 
@@ -70,9 +70,9 @@ class g1(RlPipelineCfg):
 
 
 @cfg_registry.register
-class g1_real(g1):
+class g1_real(g1): # Sim2Real
     """
-    Unitree G1 robot, Unitree Policy, Sim2Real.
+    Unitree G1 robot, Unitree Policy.
     To extend the sim2sim config to sim2real, just need to change the env to real env.
     """
 
@@ -93,7 +93,30 @@ class g1_real(g1):
 
 
 @cfg_registry.register
-class g1_switch(RlMultiPolicyPipelineCfg):
+class g1_real_loco_mimic(g1): # Sim2Real
+    """
+    Unitree G1 robot, Unitree Policy.
+    To extend the sim2sim config to sim2real, just need to change the env to real env.
+    """
+
+    # env: G1DummyEnvCfg = G1DummyEnvCfg()
+    env: G1RealEnvCfg = G1RealEnvCfg(
+        env_type="UnitreeEnv",  # For unitree_sdk2py
+        # env_type="UnitreeCppEnv",  # For unitree_cpp, check README for more details
+        unitree=G1UnitreeCfg(
+            net_if="enp211s0f1np1",  # note: change to your network interface
+        ),
+    )
+
+    ctrl: list[UnitreeCtrlCfg] = [
+        UnitreeCtrlCfg(),
+    ]
+
+    do_safety_check: bool = True  # enable safety check for real robot
+
+
+@cfg_registry.register
+class g1_switch(RlMultiPolicyPipelineCfg): # Sim2Sim
     """
     Example of multi-policy pipeline configuration.
     """
@@ -122,7 +145,7 @@ class g1_switch(RlMultiPolicyPipelineCfg):
 
 
 @cfg_registry.register
-class g1_locomimic(RlLocoMimicPipelineCfg):
+class g1_locomimic(RlLocoMimicPipelineCfg): # Sim2Sim
     """
     Example of loco mimic pipeline configuration.
     You can switch between loco and mimic policies during runtime, with interpolation.
@@ -157,7 +180,7 @@ class g1_locomimic(RlLocoMimicPipelineCfg):
 
 
 @cfg_registry.register
-class g1_h2h(RlPipelineCfg):
+class g1_h2h(RlPipelineCfg): # Sim2Sim
     """
     Human2Humanoid
     """
@@ -173,7 +196,7 @@ class g1_h2h(RlPipelineCfg):
 
 
 @cfg_registry.register
-class g1_beyondmimic(RlPipelineCfg):
+class g1_beyondmimic(RlPipelineCfg): # Sim2Sim
     """
     BeyondMimic Policy, support both with and without state estimator.
     """
@@ -194,7 +217,7 @@ class g1_beyondmimic(RlPipelineCfg):
 
 
 @cfg_registry.register
-class g1_beyondmimic_with_ctrl(RlPipelineCfg):
+class g1_beyondmimic_with_ctrl(RlPipelineCfg): # Sim2Sim
     """
     BeyondMimic with External BeyondMimicCtrl as motion source.
     """
@@ -215,7 +238,7 @@ class g1_beyondmimic_with_ctrl(RlPipelineCfg):
 
 
 @cfg_registry.register
-class g1_asap(RlPipelineCfg):
+class g1_asap(RlPipelineCfg): # Sim2Sim
     """
     Unitree G1 robot configuration, ASAP Policy, Sim2Sim.
     You can modify to play with other policies and controllers.
@@ -247,7 +270,7 @@ class g1_asap(RlPipelineCfg):
 
 
 @cfg_registry.register
-class g1_asap_loco(RlPipelineCfg):
+class g1_asap_loco(RlPipelineCfg): # Sim2Sim
     """
     Unitree G1 robot configuration, ASAP Locomotion Policy, Sim2Sim.
     You can modify to play with other policies and controllers.
@@ -270,7 +293,7 @@ class g1_asap_loco(RlPipelineCfg):
 
 
 @cfg_registry.register
-class g1_kungfubot2(RlPipelineCfg):
+class g1_kungfubot2(RlPipelineCfg): # Sim2Sim
     """
     PBHC KungfuBot2 General Policy
     """
@@ -291,7 +314,7 @@ class g1_kungfubot2(RlPipelineCfg):
 
 
 @cfg_registry.register
-class g1_twist(RlPipelineCfg):
+class g1_twist(RlPipelineCfg): # Sim2Sim
     """
     Unitree G1 robot configuration, TWIST Policy, Sim2Sim.
     TwistRedisCtrl for the original repo of high level motion stream over redis.
@@ -313,7 +336,7 @@ class g1_twist(RlPipelineCfg):
 
 
 @cfg_registry.register
-class g1_switch_beyondmimic(RlMultiPolicyPipelineCfg):
+class g1_switch_beyondmimic(RlMultiPolicyPipelineCfg): # Sim2Sim
     """
     Switch between multiple BeyondMimic policies. Withour Interpolation.
     """

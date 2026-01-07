@@ -43,11 +43,11 @@ def main():
     # pipeline_type locate at pipeline_cfgs.py
     pipeline_type = cfg.pipeline_type
 
-    # 
+    # getattr(obj, name): find attr name in obj, return class (not instance)
     pipeline_class: type[RlPipeline] = getattr(robojudo.pipeline, pipeline_type)
     logger.info(f"Using pipeline: {pipeline_type} -> {pipeline_class}")
 
-    # choice pipeline instance
+    # instantiate choosen pipeline class
     pipeline = pipeline_class(cfg=cfg)
 
     # if mujoco = False

@@ -4,6 +4,11 @@ from robojudo.config import cfg_registry
 class ConfigManager:
     def __init__(self, config_name: str, override_cfg: dict | None = None):
         self.config_name = config_name
+
+        print("\n")
+        print(f"config_manager config_name : {config_name}") # g1_locomimic_beyondmimic
+        print("\n")
+
         self.override_cfg = override_cfg
 
         self.cfg = self.parse_config()
@@ -14,6 +19,11 @@ class ConfigManager:
     def parse_config(self):
         # cfg_class = getattr(robojudo.config, self.config_name)
         cfg_class = cfg_registry.get(self.config_name)
+
+        print("\n")
+        print(f"parse_config cfg_class : {cfg_class}") # <class 'robojudo.config.g1.g1_loco_mimic_cfg.g1_locomimic_beyondmimic'>
+        print("\n")
+
         cfg_raw = cfg_class()
         # cfg_raw = make_g1_pipeline_cfg(
         #     env="g1_mujoco_env",

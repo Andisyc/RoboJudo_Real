@@ -37,9 +37,6 @@ class PolicyInterpManager(PolicyManager):
         cfg_policies_all = [cfg_policy_loco] + cfg_policies
         super().__init__(cfg_policies_all, env, device)
 
-        temp = 1
-        assert temp == 2
-
         # set current 0th to loco
         self.policy_loco_id = 0
 

@@ -7,8 +7,8 @@ class Registry:
     """
 
     def __init__(self, package: str, base_class: type):
-        self.PACKAGE = package
-        self.BASE_CLASS = base_class
+        self.PACKAGE = package # basic loading path
+        self.BASE_CLASS = base_class # make sure the type of registried class is correct
         self.modules: dict[str, str] = {}
         self.registered_modules: dict[str, type] = {}
 

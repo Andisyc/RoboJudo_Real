@@ -16,9 +16,6 @@ __all__ = [
 def __getattr__(name: str) -> type[Config]:
     try:
         cfg_class = cfg_registry.get(name)
-        print("\n")
-        print(f"inside robojudo config __init__ cfg_class {cfg_class} name {name}")
-        print("\n")
     except Exception as e:
         raise AttributeError(f"module {__name__} has no attribute {name}") from e
     print(f"[Config] Dynamic import of config: {name}")

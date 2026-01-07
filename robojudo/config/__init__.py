@@ -3,6 +3,7 @@ from robojudo.utils.module_registry import Registry
 from .config_class import Config
 from .global_path import ASSETS_DIR, ROOT_DIR, THIRD_PARTY_DIR  # noqa: F401
 
+# package name isn't the actually import module
 cfg_registry = Registry(package="robojudo.control", base_class=Config)
 
 __all__ = [

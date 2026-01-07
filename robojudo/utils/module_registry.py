@@ -8,20 +8,28 @@ class Registry:
 
     def __init__(self, package: str, base_class: type):
         self.PACKAGE = package # basic loading path
-        self.BASE_CLASS = base_class # make sure the type of registried class is correct
+        self.BASE_CLASS = base_class # make sure the type of registered class is correct
+
+        # lazy loading dict: {class name: loading path}
+        # we don't import immediately, just assemble a dict
         self.modules: dict[str, str] = {}
+
+        # active dict: {class name: class instance}
+        # here are already imported class instance
         self.registered_modules: dict[str, type] = {}
 
     @property
     def types(self) -> list[str]:
         """
         Get a list of all module types.
+        include loaded and unloaded.
         """
         return list(self.modules.keys()) + list(self.registered_modules.keys())
 
     def add(self, type_name: str, module_path: str):
         """
         Add a new module to the registry.
+        lazy import: adding module path but not import
         """
         if type_name in self.modules:
             raise ValueError(f"Type {type_name} already registered with module {self.modules[type_name]}")
@@ -31,8 +39,11 @@ class Registry:
         """
         Register a new module.
         """
+        # mandatory class type check
         if not issubclass(cls, self.BASE_CLASS):
             raise ValueError(f"Controller must be a subclass of {self.BASE_CLASS.__name__}")
+        
+        # move registered modules into active dict
         self.registered_modules[cls.__name__] = cls
         return cls
 
@@ -40,17 +51,24 @@ class Registry:
         """
         Get a module class by its type.
         """
+        # if module not exist active dict then double check
         if type_name not in self.registered_modules:
+            # if module not exist in lazy dict then raise error
             if type_name not in self.modules:
                 raise NotImplementedError(f"Unknown type: {type_name}. Available: {self.types}")
 
+            # if module exist in lazy dict but not in active dict
+            # which means this module isn't imported currently
             module_path = self.modules[type_name]
-            try:
+
+            # import the unimport module (which inside lazy dict)
+            try: # execute @controller_registry.register to instantiate the class
                 importlib.import_module(name=module_path, package=self.PACKAGE)
             except ImportError as e:
                 print(e)
                 raise RuntimeError(f"Failed to import module for type {type_name}: {module_path}") from e
 
+            # double check instantiate success or not
             if type_name not in self.registered_modules:
                 raise RuntimeError(f"{self.PACKAGE}.{type_name} not registered after importing {module_path}")
 

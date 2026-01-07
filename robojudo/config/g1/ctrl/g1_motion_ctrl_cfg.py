@@ -6,8 +6,8 @@ class G1MotionCtrlCfg(MotionCtrlCfg):
     # ==== policy specific configs ====
     track_keypoints_names: list[str] = []
     phc: MotionCtrlCfg.PhcCfg = MotionCtrlCfg.PhcCfg(
-        robot_config_file="robot/unitree_g1_29dof.yaml",
-    )
+        robot_config_file="robot/unitree_g1_29dof.yaml",)
+    
 
     # ==== motion config ====
     robot: str = "g1"
@@ -33,8 +33,8 @@ class G1MotionKungfuBotCtrlCfg(G1MotionCtrlCfg, MotionKungfuBotCtrlCfg):
     ctrl_type: str = "MotionKungfuBotCtrl"
 
     phc: MotionCtrlCfg.PhcCfg = MotionCtrlCfg.PhcCfg(
-        robot_config_file="robot/unitree_g1_23dof_KungfuBot.yaml",
-    )
+        robot_config_file="robot/unitree_g1_23dof_KungfuBot.yaml",)
+    
 
     # motion_name: str = "singles/0-KIT_6_WalkInCounterClockwiseCircle05_1_poses"
     motion_name: str = "kungfubot/Horse-stance_pose"
@@ -51,8 +51,8 @@ class G1MotionTwistCtrlCfg(G1MotionCtrlCfg, MotionTwistCtrlCfg):
     ctrl_type: str = "MotionTwistCtrl"
 
     phc: MotionCtrlCfg.PhcCfg = MotionCtrlCfg.PhcCfg(
-        robot_config_file="robot/unitree_g1_23dof_KungfuBot.yaml",
-    )
+        robot_config_file="robot/unitree_g1_23dof_KungfuBot.yaml",)
+    
 
     # motion_name: str = "singles/0-KIT_6_WalkInCounterClockwiseCircle05_1_poses"
     motion_name: str = "kungfubot/Horse-stance_pose"

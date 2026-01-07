@@ -35,12 +35,15 @@ def parse_args():
 def main():
     args = parse_args()
     logger.info(f"Using config: {args.config}")
-    config_manager = ConfigManager(config_name=args.config)
 
+    # get cfg from register (Import-Time Registry)
+    config_manager = ConfigManager(config_name=args.config)
     cfg: RlPipelineCfg = config_manager.get_cfg()
 
+    # pipeline_type locate at pipeline_cfgs.py
     pipeline_type = cfg.pipeline_type
 
+    # 
     pipeline_class: type[RlPipeline] = getattr(robojudo.pipeline, pipeline_type)
     logger.info(f"Using pipeline: {pipeline_type} -> {pipeline_class}")
 

@@ -112,6 +112,11 @@ class g1_real_loco_mimic(g1): # Sim2Real
         UnitreeCtrlCfg(),
     ]
 
+    loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
+    mimic_policies: list[G1AsapPolicyCfg] = [
+        G1AsapPolicyCfg(),
+    ]
+
     do_safety_check: bool = True  # enable safety check for real robot
 
 
@@ -170,9 +175,9 @@ class g1_locomimic(RlLocoMimicPipelineCfg): # Sim2Sim
         ),
     ]
 
-    loco_policy: G1UnitreePolicyCfg = G1UnitreePolicyCfg()
-    mimic_policies: list[G1AsapPolicyCfg] = [
-        G1AsapPolicyCfg(),
+    loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
+    mimic_policies: list[G1BeyondMimicPolicyCfg] = [
+        G1BeyondMimicPolicyCfg(policy_name="g1_dance2", without_state_estimator=False, max_timestep=1000),
     ]
 
 

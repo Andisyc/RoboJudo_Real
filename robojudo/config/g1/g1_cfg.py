@@ -110,11 +110,15 @@ class g1_real_loco_mimic(g1): # Sim2Real
 
     ctrl: list[UnitreeCtrlCfg] = [
         UnitreeCtrlCfg(),
+        # "A": "[SHUTDOWN]",
+        # "X": "[MOTION_FADE_IN]",
+        # "B": "[MOTION_FADE_OUT]",
+        # "Y": "[MOTION_RESET]",
     ]
 
     loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
-    mimic_policies: list[G1AsapPolicyCfg] = [
-        G1AsapPolicyCfg(),
+    mimic_policies: list[G1BeyondMimicPolicyCfg] = [
+        G1BeyondMimicPolicyCfg(policy_name="g1_dance2", without_state_estimator=False, max_timestep=1000),
     ]
 
     do_safety_check: bool = True  # enable safety check for real robot
@@ -163,8 +167,12 @@ class g1_locomimic(RlLocoMimicPipelineCfg): # Sim2Sim
     ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
         KeyboardCtrlCfg(
             triggers_extra={
+                "i": "[SIM_REBORN]",
+                "o": "[SHUTDOWN]",
                 "]": "[POLICY_LOCO]",
                 "[": "[POLICY_MIMIC]",
+                ";": "[POLICY_SWITCH],NEXT",
+                "'": "[POLICY_SWITCH],LAST",
             }
         ),
         JoystickCtrlCfg(

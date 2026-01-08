@@ -93,27 +93,56 @@ class g1_real(g1): # Sim2Real
 
 
 @cfg_registry.register
-class g1_real_loco_mimic(g1): # Sim2Real
+class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
     """
     Unitree G1 robot, Unitree Policy.
     To extend the sim2sim config to sim2real, just need to change the env to real env.
     """
+    robot: str = "g1"
 
     # env: G1DummyEnvCfg = G1DummyEnvCfg()
     env: G1RealEnvCfg = G1RealEnvCfg(
         env_type="UnitreeEnv",  # For unitree_sdk2py
         # env_type="UnitreeCppEnv",  # For unitree_cpp, check README for more details
         unitree=G1UnitreeCfg(
-            net_if="enp211s0f1np1",  # note: change to your network interface
+            net_if="eth0",  # note: change to your network interface enp211s0f1np1
         ),
     )
 
-    ctrl: list[UnitreeCtrlCfg] = [
-        UnitreeCtrlCfg(),
-        # "A": "[SHUTDOWN]",
-        # "X": "[MOTION_FADE_IN]",
-        # "B": "[MOTION_FADE_OUT]",
-        # "Y": "[MOTION_RESET]",
+    # ctrl: list[UnitreeCtrlCfg] = [
+    #     UnitreeCtrlCfg(),
+    #     # "A": "[SHUTDOWN]", # damping
+    #     # "X": "[MOTION_FADE_IN]",
+    #     # "B": "[MOTION_FADE_OUT]",
+    #     # "Y": "[MOTION_RESET]",
+    # ]
+
+    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    #     KeyboardCtrlCfg(
+    #         triggers_extra={
+    #             "i": "[SIM_REBORN]",
+    #             "o": "[SHUTDOWN]",
+    #             "]": "[POLICY_LOCO]",
+    #             "[": "[POLICY_MIMIC]",
+    #             ";": "[POLICY_SWITCH],NEXT",
+    #             "'": "[POLICY_SWITCH],LAST",
+    #         }
+    #     ),
+    #     JoystickCtrlCfg(
+    #         triggers_extra={
+    #             "RB+Down": "[POLICY_LOCO]",
+    #             "RB+Up": "[POLICY_MIMIC]",
+    #         }
+    #     ),
+    # ]
+
+    ctrl: list[JoystickCtrlCfg] = [
+        JoystickCtrlCfg(
+            triggers_extra={
+                "RB+Down": "[POLICY_LOCO]",
+                "RB+Up": "[POLICY_MIMIC]",
+            }
+        ),
     ]
 
     loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()

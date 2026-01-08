@@ -3,7 +3,7 @@ from typing import Literal
 from robojudo.environment.env_cfgs import UnitreeEnvCfg
 
 # from robojudo.tools.tool_cfgs import ZedOdometryCfg
-from .g1_env_cfg import G1EnvCfg
+from .g1_env_cfg import G1EnvCfg, G1_23EnvCfg
 
 
 class G1UnitreeCfg(UnitreeEnvCfg.UnitreeCfg):
@@ -15,12 +15,14 @@ class G1UnitreeCfg(UnitreeEnvCfg.UnitreeCfg):
     enable_odometry: bool = True
 
 
-class G1RealEnvCfg(G1EnvCfg, UnitreeEnvCfg):
+class G1RealEnvCfg(G1EnvCfg, UnitreeEnvCfg): # G1_23EnvCfg
     # env_type: str = UnitreeEnvCfg.model_fields["env_type"].default
     env_type: str = "UnitreeCppEnv"
     # ====== ENV CONFIGURATION ======
     unitree: UnitreeEnvCfg.UnitreeCfg = G1UnitreeCfg(
         net_if="eth0",
+        robot="g1",
+        msg_type="hg",
     )
 
     odometry_type: Literal["NONE", "DUMMY", "UNITREE", "ZED"] = "UNITREE"

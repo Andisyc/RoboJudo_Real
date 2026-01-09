@@ -136,7 +136,12 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
     #     ),
     # ]
 
-    ctrl: list[JoystickCtrlCfg] = [
+    ctrl: list[UnitreeCtrlCfg | JoystickCtrlCfg] = [
+        UnitreeCtrlCfg(),
+        # "A": "[SHUTDOWN]", # damping
+        # "X": "[MOTION_FADE_IN]",
+        # "B": "[MOTION_FADE_OUT]",
+        # "Y": "[MOTION_RESET]",
         JoystickCtrlCfg(
             triggers_extra={
                 "RB+Down": "[POLICY_LOCO]",

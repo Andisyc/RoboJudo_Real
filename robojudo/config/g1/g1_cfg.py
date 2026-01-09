@@ -109,33 +109,6 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
         ),
     )
 
-    # ctrl: list[UnitreeCtrlCfg] = [
-    #     UnitreeCtrlCfg(),
-    #     # "A": "[SHUTDOWN]", # damping
-    #     # "X": "[MOTION_FADE_IN]",
-    #     # "B": "[MOTION_FADE_OUT]",
-    #     # "Y": "[MOTION_RESET]",
-    # ]
-
-    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
-    #     KeyboardCtrlCfg(
-    #         triggers_extra={
-    #             "i": "[SIM_REBORN]",
-    #             "o": "[SHUTDOWN]",
-    #             "]": "[POLICY_LOCO]",
-    #             "[": "[POLICY_MIMIC]",
-    #             ";": "[POLICY_SWITCH],NEXT",
-    #             "'": "[POLICY_SWITCH],LAST",
-    #         }
-    #     ),
-    #     JoystickCtrlCfg(
-    #         triggers_extra={
-    #             "RB+Down": "[POLICY_LOCO]",
-    #             "RB+Up": "[POLICY_MIMIC]",
-    #         }
-    #     ),
-    # ]
-
     ctrl: list[UnitreeCtrlCfg | JoystickCtrlCfg] = [
         UnitreeCtrlCfg(),
         # "A": "[SHUTDOWN]", # damping

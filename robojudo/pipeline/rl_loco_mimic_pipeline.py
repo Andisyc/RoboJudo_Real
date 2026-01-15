@@ -199,6 +199,12 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         env_class: type[Environment] = getattr(robojudo.environment, self.cfg.env.env_type)
         self.env: Environment = env_class(cfg_env=self.cfg.env, device=self.device)
 
+        print("\n")
+        print(f"RlLocoMimicPipeline: {self.device}")
+        print("\n")
+        # temp = 1
+        # assert temp == 2
+
         # load in controller (keyboard or joystick)
         self.ctrl_manager = CtrlManager(cfg_ctrls=self.cfg.ctrl, env=self.env, device=self.device)
 
@@ -314,8 +320,14 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
                 timestep=self.timestep,)
 
     def step(self, dry_run=False):
+        import time
+        t0 = time.perf_counter()
+
         # update [dof, odo, FK, con]
         self.env.update()
+
+        # 读取硬件状态耗时
+        t1 = time.perf_counter()
 
         # get proprioception
         env_data = self.env.get_data()
@@ -326,6 +338,9 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         if len(commands) > 0:
             logger.info(f"{'=' * 10} COMMANDS {'=' * 10}\n{commands}")
 
+        # 读取手柄/键盘输入耗时
+        t2 = time.perf_counter()
+
         # if current policy is loco
         if self.policy_manager.current_policy_id == self.policy_manager.policy_loco_id:
             ctrl_data["ref_dof_pos"] = self.policy.obs_adapter.fit(self.policy_manager.override_dof_pos)
@@ -333,8 +348,14 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         # get obs for policy & ext for mujoco
         obs, extras = self.policy.get_observation(env_data, ctrl_data)
 
+        # 构建观测量耗时
+        t3 = time.perf_counter()
+
         # forward propagation for PD signal
         pd_target = self.policy.get_pd_target(obs)
+
+        # 推理耗时
+        t4 = time.perf_counter()
 
         # if current policy is loco
         if self.policy_manager.current_policy_id == self.policy_manager.policy_loco_id:
@@ -344,9 +365,27 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         if not dry_run:
             self.env.step(pd_target, extras.get("hand_pose", None))
             # logger.debug(pd_target)
+        
+        # 发送给电机耗时
+        t5 = time.perf_counter()
 
         # output callback info to terminal
         self.post_step_callback(env_data, ctrl_data, extras, pd_target)
+
+        # 打印到控制台耗时
+        t6 = time.perf_counter()
+
+        # === [新增] 打印详细耗时分析 ===
+        total_ms = (t6 - t0) * 1000
+        # 只有当总耗时超过 15ms 时才打印，避免刷屏 (目标是 20ms)
+        if total_ms > 15.0:
+            print(f"rl_loco_mimic Total: {total_ms:.2f}ms | " # 60 ~ 106 ms
+                  f"ReadEnv: {(t1-t0)*1000:.2f}ms | "         # 4 ~ 57 ms
+                  f"GetCtrl: {(t2-t1)*1000:.2f}ms | "         # 5 ~ 11 ms
+                  f"MakeObs: {(t3-t2)*1000:.2f}ms | "         # 11 ~ 32 ms
+                  f"Infer: {(t4-t3)*1000:.2f}ms | "           # 16 ~ 28 ms
+                  f"WriteEnv: {(t5-t4)*1000:.2f}ms | "        # 0.02 ~ 0.05 ms
+                  f"Post: {(t6-t5)*1000:.2f}ms")              # 0.22 ~ 0.35 ms
 
     # invoke prepare() from RlPipeline
     def prepare(self):

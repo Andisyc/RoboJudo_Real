@@ -196,8 +196,13 @@ class RlPipeline(Pipeline):
 
         # iterate compute & update joint angle
         for t in range(traj_len):
+            t0 = time.perf_counter()
+
             # get current joint angle from motor
             current_motor_angle = np.array(self.env.dof_pos)
+
+            # 更新电机角度耗时
+            t1 = time.perf_counter()
 
             # inside 300 step current mixup with desire angle
             # after 300 step domanite by desire joint angle
@@ -206,21 +211,45 @@ class RlPipeline(Pipeline):
             # compute mixup action with current and desire angle
             action = (1 - blend_ratio) * current_motor_angle + blend_ratio * desired_motor_angle
 
+            t2 = time.perf_counter()
+
             # forward propagation but abandon action
             # fill in history buffer, warm up network
             self.step(dry_run=True)
 
+            t3 = time.perf_counter()
+
+            # print("\n")
+            # print(f"action.device: {action.device}") # np.ndarry
+            # print("\n")
+
             # send motor mixup action
             self.env.step(action)
+
+            t4 = time.perf_counter()
 
             # compute period, sleep if too fast, error if too slow
             time_diff = last_step_time + self.dt - time.time()
             if time_diff > 0:
                 time.sleep(time_diff)
             else:
-                logger.error("Warning: frame drop")
+                logger.error(f"Warning: frame drop: self.freq: {self.freq}, self.dt: {self.dt}, time_diff: {time_diff}") # dt = 0.02, 0.02 x 1000 = 20ms
             last_step_time = time.time()
             pbar.update()
+
+            t5 = time.perf_counter()
+
+            # === [新增] 打印详细耗时分析 ===
+            total_ms = (t5 - t0) * 1000
+            # 只有当总耗时超过 15ms 时才打印，避免刷屏 (目标是 20ms)
+            if total_ms > 15.0:
+                print(f"rl_pipeline Total: {total_ms:.2f}ms | "
+                    f"ReadEnv: {(t1-t0)*1000:.2f}ms | "   # 0.03 ~ 0.07 ms
+                    f"infer: {(t2-t1)*1000:.2f}ms | "     # 0.07 ~ 0.11 ms
+                    f"envstep: {(t3-t2)*1000:.2f}ms | "   # 47.8 ~ 100 ms
+                    f"sendmotor: {(t4-t3)*1000:.2f}ms | " # 3.37 ~ 6.04 ms
+                    f"post: {(t5-t4)*1000:.2f}ms")        # 26.6 ~ 57.3 ms
+            print("\n")
 
             # reset obs, policy, ctrl buffer at 900 steps
             # since at 900 steps robot already reach init state

@@ -50,12 +50,16 @@ def main():
     # instantiate choosen pipeline class
     pipeline = pipeline_class(cfg=cfg)
 
+    print("\n")
+    print(f"cfg.device: {cfg.device}")
+    print("\n")
+
     # if mujoco = False
     if not cfg.env.is_sim:
         pipeline.prepare()
     
-    temp = 1
-    assert temp == 2
+    # temp = 1
+    # assert temp == 2
 
     # continue execute step
     while True:

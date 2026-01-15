@@ -1,3 +1,4 @@
+from __future__ import annotations
 from robojudo.config import ASSETS_DIR
 from robojudo.controller.ctrl_cfgs import MotionCtrlCfg, MotionH2HCtrlCfg, MotionKungfuBotCtrlCfg, MotionTwistCtrlCfg
 

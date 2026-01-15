@@ -1,3 +1,4 @@
+from typing import Optional, Union # 引入兼容类型
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -47,7 +48,9 @@ class Environment(ABC):
 
         self.visualizer = None  # for sim viz debug plot
 
-    def update_dof_cfg(self, override_cfg: DoFConfig | None = None):
+    # py3.10 -> py3.8
+    # def update_dof_cfg(self, override_cfg: DoFConfig | None = None): # py3.10
+    def update_dof_cfg(self, override_cfg: Optional[DoFConfig] = None): # py3.8
         dof_config: DoFConfig = self.cfg_env.dof
         if override_cfg is not None:
             dof_config = merge_dof_cfgs(self.cfg_env.dof, override_cfg)
@@ -66,7 +69,9 @@ class Environment(ABC):
         # if self.kinematics is not None: # TODO: check usage
         #     self.kinematics.update_joint_names_subset(self.joint_names)
 
-    def set_born_place(self, quat: np.ndarray | None = None, pos: np.ndarray | None = None):
+    # py3.10 -> py3.8
+    # def set_born_place(self, quat: np.ndarray | None = None, pos: np.ndarray | None = None): # py3.10
+    def set_born_place(self, quat: Optional[np.ndarray] = None, pos: Optional[np.ndarray] = None): # py3.8
         """Need to be called with real quat and pos from subclass"""
         self.base_align.set_base(quat, pos)
 

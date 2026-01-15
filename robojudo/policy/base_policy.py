@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, List, Optional
 import logging
 from abc import ABC, abstractmethod
 from collections import deque
@@ -47,7 +49,9 @@ class Policy(ABC):
         self.history_length = self.cfg_policy.history_length
         self.history_obs_size = self.cfg_policy.history_obs_size
 
-    def _init_history(self, default_history: np.ndarray | torch.Tensor | list):
+    # py3.10 -> py3.8
+    # def _init_history(self, default_history: np.ndarray | torch.Tensor | list): # py3.10
+    def _init_history(self, default_history: Union[np.ndarray, torch.Tensor, list]): # py3.8
         logger.debug(f"Initializing history buffer as {self.history_length} x {len(default_history)}")
         self.history_buf = deque(maxlen=self.history_length)
         for _ in range(self.history_length):

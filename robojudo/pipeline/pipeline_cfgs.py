@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union, List, Optional
 from typing import Any
 
 from pydantic import model_validator
@@ -32,7 +34,10 @@ class RlPipelineCfg(PipelineCfg):
     # ===== Pipeline Config =====
     robot: str  # robot name, e.g. "g1"
 
-    env: EnvCfg | Any
+    # py3.10 -> py3.8
+    # env: EnvCfg | Any # py3.10
+    env: Union[EnvCfg, Any] # py3.8
+    
     ctrl: list[CtrlCfg | Any] = []
     policy: PolicyCfg | Any
 

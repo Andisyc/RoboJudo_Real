@@ -123,14 +123,16 @@ class RlPipeline(Pipeline):
         self.timestep += 1
         commands = ctrl_data.get("COMMANDS", [])
         for command in commands:
-            match command:
-                case "[SHUTDOWN]":
-                    logger.warning("Emergency shutdown!")
-                    self.env.shutdown()
-                case "[SIM_REBORN]":
-                    if hasattr(self.env, "reborn"):
-                        logger.warning("Simulation Env reborn!")
-                        self.env.reborn()  # pyright: ignore[reportAttributeAccessIssue]
+            # match command:
+                # case "[SHUTDOWN]":
+            if command == "[SHUTDOWN]":
+                logger.warning("Emergency shutdown!")
+                self.env.shutdown()
+                # case "[SIM_REBORN]":
+            elif command == "[SIM_REBORN]":
+                if hasattr(self.env, "reborn"):
+                    logger.warning("Simulation Env reborn!")
+                    self.env.reborn()  # pyright: ignore[reportAttributeAccessIssue]
 
         self.ctrl_manager.post_step_callback(ctrl_data)
 

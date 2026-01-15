@@ -1,3 +1,4 @@
+from __future__ import annotations
 import logging
 from collections.abc import Callable
 from enum import Enum, auto
@@ -243,13 +244,15 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
 
         # Handle policy CALLBACK
         for callback in extras.get("CALLBACK", []):
-            match callback:
-                case "[MOTION_DONE]":
-                    if self.policy_locomotion_mimic_flag == 1:
-                        commands.append("[POLICY_LOCO]")
-                        logger.info("Mimic motion done, switch to locomotion policy.")
+            # match callback:
+                # case "[MOTION_DONE]":
+            if command == "[MOTION_DONE]":
+                if self.policy_locomotion_mimic_flag == 1:
+                    commands.append("[POLICY_LOCO]")
+                    logger.info("Mimic motion done, switch to locomotion policy.")
 
         for command in commands:
+            """
             match command:
                 case "[SHUTDOWN]":
                     logger.warning("Emergency shutdown!")
@@ -270,6 +273,27 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
                 case "[POLICY_MIMIC]":
                     self.policy_locomotion_mimic_flag = 1
                     self.policy_manager.switch_to_mimic()
+            """
+
+            if command == "[SHUTDOWN]":
+                logger.warning("Emergency shutdown!")
+                self.env.shutdown()
+            elif command == "[SIM_REBORN]":
+                if hasattr(self.env, "reborn"):
+                    logger.warning("Simulation Env reborn!")
+                    self.env.reborn()
+            elif command.startswith("[POLICY_SWITCH]"):
+                switch_target = cmd.split(",")[1]
+                if switch_target == "NEXT":
+                    self.policy_manager.toggle_mimic_policy(1)
+                elif switch_target == "LAST":
+                    self.policy_manager.toggle_mimic_policy(-1)
+            elif command == "[POLICY_LOCO]":
+                self.policy_locomotion_mimic_flag = 0
+                self.policy_manager.switch_to_loco()
+            elif command == "[POLICY_MIMIC]":
+                self.policy_locomotion_mimic_flag = 1
+                self.policy_manager.switch_to_mimic()
 
         self.ctrl_manager.post_step_callback(ctrl_data)
 

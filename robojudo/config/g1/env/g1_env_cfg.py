@@ -1,3 +1,4 @@
+from __future__ import annotations
 from robojudo.config import ASSETS_DIR
 from robojudo.environment.env_cfgs import EnvCfg
 from robojudo.tools.tool_cfgs import DoFConfig, ForwardKinematicCfg

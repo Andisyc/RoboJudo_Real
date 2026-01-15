@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from typing import Literal
 
 from pydantic import model_validator
@@ -10,7 +12,10 @@ class EnvCfg(Config):
     env_type: str  # name of the environment class
     is_sim: bool = False
 
-    urdf: str | None = None
+    # py3.10 -> py3.8
+    # urdf: str | None = None # py3.10
+    urdf: Optional[str] = None # py3.8
+
     xml: str
     body_names: list[str] | None = None
 

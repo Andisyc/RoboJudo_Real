@@ -1,3 +1,4 @@
+from __future__ import annotations
 from robojudo.config import cfg_registry
 from robojudo.controller.ctrl_cfgs import (
     JoystickCtrlCfg,  # noqa: F401

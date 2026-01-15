@@ -53,6 +53,9 @@ def main():
     # if mujoco = False
     if not cfg.env.is_sim:
         pipeline.prepare()
+    
+    temp = 1
+    assert temp == 2
 
     # continue execute step
     while True:

@@ -59,6 +59,7 @@ class UnitreePolicy(Policy):
                 for event in keys:
                     if event["type"] == "keyboard":
                         value = event["pressed"] * 1.5
+                        """
                         match event["name"]:
                             case "w":
                                 commands[0] = command_remap(value, self.commands_map[0])
@@ -72,6 +73,19 @@ class UnitreePolicy(Policy):
                                 commands[2] = command_remap(value, self.commands_map[2])
                             case "q":
                                 commands[2] = command_remap(-value, self.commands_map[2])
+                        """
+                        if event["name"] == "w":
+                            commands[0] = command_remap(value, self.commands_map[0])
+                        elif event["name"] == "s":
+                            commands[0] = command_remap(-value, self.commands_map[0])
+                        elif event["name"] == "a":
+                            commands[1] = command_remap(-value, self.commands_map[1])
+                        elif event["name"] == "d":
+                            commands[1] = command_remap(value, self.commands_map[1])
+                        elif event["name"] == "e":
+                            commands[2] = command_remap(value, self.commands_map[2])
+                        elif event["name"] == "q":
+                            commands[2] = command_remap(-value, self.commands_map[2])
                 break
         return commands
 
@@ -171,7 +185,8 @@ class UnitreeWoGaitPolicy(UnitreePolicy):
         self.history_buf.append(obs_current)
 
         # concat history obs as one vector
-        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
+        # history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
+        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf)]
         obs = np.concatenate(history_list, axis=0)
 
         extras = {"commands": commands,}

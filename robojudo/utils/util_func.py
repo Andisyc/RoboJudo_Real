@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Tuple, List, Optional, Union
 import numpy as np
 from scipy.spatial.transform import Rotation as sRot
 
@@ -128,7 +130,9 @@ def matrix_from_quat(quat: np.ndarray) -> np.ndarray:
 
 
 def subtract_frame_transforms(
-    t01: np.ndarray, q01: np.ndarray, t02: np.ndarray | None = None, q02: np.ndarray | None = None
+#     t01: np.ndarray, q01: np.ndarray, t02: np.ndarray | None = None, q02: np.ndarray | None = None
+# ) -> tuple[np.ndarray, np.ndarray]:
+    t01: np.ndarray, q01: np.ndarray, t02: Optional[np.ndarray] = None, q02: Optional[np.ndarray] = None
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute T12 = T01^{-1} * T02 using scipy Rotation.

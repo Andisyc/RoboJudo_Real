@@ -61,6 +61,7 @@ class AsapPolicy(Policy):
             self.timestep += 1 * self.play_speed
 
         for command in commands or []:
+            """
             match command:
                 case "[MOTION_RESET]":
                     self.reset()
@@ -68,6 +69,13 @@ class AsapPolicy(Policy):
                     self.play_speed = 1.0
                 case "[MOTION_FADE_OUT]":
                     self.play_speed = 0.0
+            """
+            if command == "[MOTION_RESET]":
+                self.reset()
+            elif command ==  "[MOTION_FADE_IN]":
+                self.play_speed = 1.0
+            elif command ==  "[MOTION_FADE_OUT]":
+                self.play_speed = 0.0
         pass
 
     def _get_frame_encoding(self):

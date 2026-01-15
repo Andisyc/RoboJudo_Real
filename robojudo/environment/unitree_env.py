@@ -1,3 +1,4 @@
+from typing import Tuple, List, Optional, Union
 import logging
 import time
 
@@ -173,7 +174,8 @@ class UnitreeEnv(Environment):
             self.set_born_place()
             self.update()
 
-    def set_born_place(self, quat: np.ndarray | None = None, pos: np.ndarray | None = None):
+    # def set_born_place(self, quat: np.ndarray | None = None, pos: np.ndarray | None = None):
+    def set_born_place(self, quat: Optional[np.ndarray] = None, pos: Optional[np.ndarray] = None):
         quat_ = self.base_quat if quat is None else quat
         pos_ = self.base_pos if pos is None else pos
         super().set_born_place(quat_, pos_)
@@ -314,7 +316,9 @@ class UnitreeEnv(Environment):
         create_damping_cmd(self.low_cmd)
         self.send_cmd(self.low_cmd)
 
-    def send_cmd(self, cmd: LowCmdGo | LowCmdHG = None):
+    # def send_cmd(self, cmd: LowCmdGo | LowCmdHG = None):
+    def send_cmd(self, cmd: Union[LowCmdGo, LowCmdHG] = None):
+        
         if cmd is None:
             cmd = self.low_cmd
         cmd.crc = CRC().Crc(cmd)
@@ -391,11 +395,17 @@ class UnitreeEnv(Environment):
 
         if hand_pose is not None:
             # logger.debug(f"Control hand pose: {hand_pose}")
+            """
             match self.hand_type:
                 case "Dex-3":
                     self.send_dex_hand_cmd(hand_pose)
                 case "Inspire":
                     self.send_inspire_hand_cmd(hand_pose)
+            """
+            if self.hand_type == "Dex-3":
+                self.send_dex_hand_cmd(hand_pose)
+            elif self.hand_type == "Inspire":
+                self.send_inspire_hand_cmd(hand_pose)
 
         for j in range(self.num_dofs):
             if self._dof_idx is None:

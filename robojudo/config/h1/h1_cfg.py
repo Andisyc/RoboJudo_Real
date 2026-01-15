@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import List, Union
 from robojudo.config import cfg_registry
 from robojudo.controller.ctrl_cfgs import (
     JoystickCtrlCfg,  # noqa: F401
@@ -29,7 +31,9 @@ class h1(RlPipelineCfg):
     robot: str = "h1"
     env: H1MujocoEnvCfg = H1MujocoEnvCfg()
 
-    ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [
+    # py3.10 -> py3.8
+    # ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [
+    ctrl: List[Union[JoystickCtrlCfg, KeyboardCtrlCfg]] = [
         JoystickCtrlCfg(),
         KeyboardCtrlCfg(),
     ]
@@ -70,7 +74,9 @@ class h1_switch(RlMultiPolicyPipelineCfg):
     robot: str = "h1"
     env: H1MujocoEnvCfg = H1MujocoEnvCfg()
 
-    ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, JoystickCtrlCfg]] = [
         KeyboardCtrlCfg(
             triggers_extra={
                 "Key.tab": "[POLICY_TOGGLE]",
@@ -97,7 +103,9 @@ class h1_h2h(RlPipelineCfg):
     robot: str = "h1"
     env: H1MujocoEnvCfg = H1MujocoEnvCfg()
 
-    ctrl: list[KeyboardCtrlCfg | H1MotionH2HCtrlCfg] = [
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | H1MotionH2HCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, H1MotionH2HCtrlCfg]] = [
         KeyboardCtrlCfg(),
         H1MotionH2HCtrlCfg(),
     ]

@@ -1,5 +1,5 @@
+from __future__ import annotations
 import logging
-
 import robojudo.environment
 import robojudo.policy
 from robojudo.controller import CtrlManager
@@ -123,6 +123,7 @@ class RlMultiPolicyPipeline(RlPipeline):
 
         commands = ctrl_data.get("COMMANDS", [])
         for command in commands:
+            """
             match command:
                 case "[SHUTDOWN]":
                     logger.warning("Emergency shutdown!")
@@ -140,6 +141,22 @@ class RlMultiPolicyPipeline(RlPipeline):
                     policy_id = int(cmd.split(",")[1])
                     if policy_id < self.policy_manager.num_policies:
                         self.policy_manager.switch_policy(policy_id)
+            """
+            if command == "[SHUTDOWN]":
+                logger.warning("Emergency shutdown!")
+                self.env.shutdown()
+            elif command == "[SIM_REBORN]":
+                if hasattr(self.env, "reborn"):
+                    logger.warning("Simulation Env reborn!")
+                    self.env.reborn()
+            elif command == "[POLICY_TOGGLE]":
+                logger.warning("Policy toggled!")
+                next_policy_id = (self.policy_manager.current_policy_id + 1) % self.policy_manager.num_policies
+                self.policy_manager.switch_policy(next_policy_id)
+            elif command.startswith("[POLICY_SWITCH]"):
+                policy_id = int(cmd.split(",")[1])
+                if policy_id < self.policy_manager.num_policies:
+                    self.policy_manager.switch_policy(policy_id)
 
         self.ctrl_manager.post_step_callback(ctrl_data)
 

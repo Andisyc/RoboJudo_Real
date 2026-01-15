@@ -1,3 +1,4 @@
+from __future__ import annotations
 from robojudo.policy.policy_cfgs import TwistPolicyCfg
 from robojudo.tools.tool_cfgs import DoFConfig
 

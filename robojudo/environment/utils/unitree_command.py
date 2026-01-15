@@ -1,3 +1,4 @@
+from typing import Union
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowCmd_ as LowCmdGo  # type: ignore
 from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_ as LowCmdHG  # type: ignore
 
@@ -7,7 +8,8 @@ class MotorMode:
     AB = 1  # Parallel Control for A/B Joints
 
 
-def create_damping_cmd(cmd: LowCmdGo | LowCmdHG):
+# def create_damping_cmd(cmd: LowCmdGo | LowCmdHG):
+def create_damping_cmd(cmd: Union[LowCmdGo, LowCmdHG]):
     size = len(cmd.motor_cmd)
     for i in range(size):
         cmd.motor_cmd[i].q = 0
@@ -17,7 +19,8 @@ def create_damping_cmd(cmd: LowCmdGo | LowCmdHG):
         cmd.motor_cmd[i].tau = 0
 
 
-def create_zero_cmd(cmd: LowCmdGo | LowCmdHG):
+# def create_zero_cmd(cmd: LowCmdGo | LowCmdHG):
+def create_zero_cmd(cmd: Union[LowCmdGo, LowCmdHG]):
     size = len(cmd.motor_cmd)
     for i in range(size):
         cmd.motor_cmd[i].q = 0

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from robojudo.config import cfg_registry
 from robojudo.controller.ctrl_cfgs import (
     JoystickCtrlCfg,  # noqa: F401
@@ -42,7 +43,10 @@ class g1_locomimic_beyondmimic(G1RlLocoMimicPipelineCfg):
 
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg()
-    ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, JoystickCtrlCfg]] = [
         KeyboardCtrlCfg(
             triggers={
                 "i": "[SIM_REBORN]",
@@ -88,7 +92,9 @@ class g1_locomimic_asap(G1RlLocoMimicPipelineCfg):
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg(forward_kinematic=None, update_with_fk=False, born_place_align=True)
 
-    ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [  # note: the ranking of controllers matters
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [  # note: the ranking of controllers matters
+    ctrl: List[Union[KeyboardCtrlCfg, JoystickCtrlCfg]] = [
         KeyboardCtrlCfg(
             triggers={
                 "i": "[SIM_REBORN]",
@@ -203,7 +209,9 @@ class g1_locomimic_asap_full(G1RlLocoMimicPipelineCfg):
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg(forward_kinematic=None, update_with_fk=False, born_place_align=True)
 
-    ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [  # note: the ranking of controllers matters
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [  # note: the ranking of controllers matters
+    ctrl: List[Union[KeyboardCtrlCfg, JoystickCtrlCfg]] = [
         KeyboardCtrlCfg(
             triggers={
                 "i": "[SIM_REBORN]",

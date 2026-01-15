@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import List, Union
 from robojudo.config import cfg_registry
 
 from robojudo.controller.ctrl_cfgs import (
@@ -57,7 +59,9 @@ class g1(RlPipelineCfg): # Sim2Sim
     # env: G1_23MujocoEnvCfg = G1_23MujocoEnvCfg()
     # env: G1_12MujocoEnvCfg = G1_12MujocoEnvCfg()
 
-    ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [  # note: the ranking of controllers matters
+    # py3.10 -> py3.8
+    # ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [  # note: the ranking of controllers matters
+    ctrl: List[Union[JoystickCtrlCfg, KeyboardCtrlCfg]] = [
         JoystickCtrlCfg(),
         # KeyboardCtrlCfg(),
     ]
@@ -105,11 +109,13 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
         env_type="UnitreeEnv",  # For unitree_sdk2py
         # env_type="UnitreeCppEnv",  # For unitree_cpp, check README for more details
         unitree=G1UnitreeCfg(
-            net_if="eth0",  # note: change to your network interface enp211s0f1np1
+            net_if="eth0",  # note: change to your network interface enp211s0f1np1 | eth0, 
         ),
     )
 
-    ctrl: list[UnitreeCtrlCfg | JoystickCtrlCfg] = [
+    # py3.10 -> py3.8
+    # ctrl: list[UnitreeCtrlCfg | JoystickCtrlCfg] = [
+    ctrl: List[Union[UnitreeCtrlCfg, JoystickCtrlCfg]] = [
         UnitreeCtrlCfg(),
         # "A": "[SHUTDOWN]", # damping
         # "X": "[MOTION_FADE_IN]",
@@ -140,7 +146,9 @@ class g1_switch(RlMultiPolicyPipelineCfg): # Sim2Sim
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg()
 
-    ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, JoystickCtrlCfg]] = [
         # KeyboardCtrlCfg(
         #     triggers_extra={
         #         "Key.tab": "[POLICY_TOGGLE]",
@@ -171,7 +179,9 @@ class g1_locomimic(RlLocoMimicPipelineCfg): # Sim2Sim
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg()
 
-    ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, JoystickCtrlCfg]] = [
         KeyboardCtrlCfg(
             triggers_extra={
                 "i": "[SIM_REBORN]",
@@ -207,7 +217,10 @@ class g1_h2h(RlPipelineCfg): # Sim2Sim
 
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg()
-    ctrl: list[KeyboardCtrlCfg | G1MotionH2HCtrlCfg] = [
+
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | G1MotionH2HCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, G1MotionH2HCtrlCfg]] = [
         KeyboardCtrlCfg(),
         G1MotionH2HCtrlCfg(),
     ]
@@ -244,7 +257,10 @@ class g1_beyondmimic_with_ctrl(RlPipelineCfg): # Sim2Sim
 
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg()
-    ctrl: list[KeyboardCtrlCfg | G1BeyondmimicCtrlCfg] = [
+
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | G1BeyondmimicCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, G1BeyondmimicCtrlCfg]] = [
         KeyboardCtrlCfg(),
         G1BeyondmimicCtrlCfg(
             motion_name="dance1_subject2",  # you can put your own motion file in assets/motions/g1
@@ -267,7 +283,9 @@ class g1_asap(RlPipelineCfg): # Sim2Sim
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg(forward_kinematic=None, update_with_fk=False, born_place_align=True)
 
-    ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [  # note: the ranking of controllers matters
+    # py3.10 -> py3.8
+    # ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [  # note: the ranking of controllers matters
+    ctrl: List[Union[JoystickCtrlCfg, KeyboardCtrlCfg]] = [
         # JoystickCtrlCfg(),
         KeyboardCtrlCfg(triggers={"i": "[SIM_REBORN]", "o": "[SHUTDOWN]", "r": "[MOTION_RESET]"}),
     ]
@@ -299,7 +317,9 @@ class g1_asap_loco(RlPipelineCfg): # Sim2Sim
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg(forward_kinematic=None, update_with_fk=False, born_place_align=False)
 
-    ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [  # note: the ranking of controllers matters
+    # py3.10 -> py3.8
+    # ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [  # note: the ranking of controllers matters
+    ctrl: List[Union[JoystickCtrlCfg, KeyboardCtrlCfg]] = [
         # JoystickCtrlCfg(),
         KeyboardCtrlCfg(
             triggers={
@@ -320,7 +340,10 @@ class g1_kungfubot2(RlPipelineCfg): # Sim2Sim
 
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg()
-    ctrl: list[KeyboardCtrlCfg | G1MotionKungfuBotCtrlCfg] = [
+
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | G1MotionKungfuBotCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, G1MotionKungfuBotCtrlCfg]] = [
         KeyboardCtrlCfg(),
         G1MotionKungfuBotCtrlCfg(
             motion_name="kungfubot/Horse-stance_pose",  # put motion files in assets/motions/g1/phc/kungfubot
@@ -344,7 +367,9 @@ class g1_twist(RlPipelineCfg): # Sim2Sim
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg(forward_kinematic=None, update_with_fk=False, born_place_align=False)
 
-    ctrl: list[G1TwistRedisCtrlCfg | G1MotionTwistCtrlCfg] = [  # note: the ranking of controllers matters
+    # py3.10 -> py3.8
+    # ctrl: list[G1TwistRedisCtrlCfg | G1MotionTwistCtrlCfg] = [  # note: the ranking of controllers matters
+    ctrl: List[Union[G1TwistRedisCtrlCfg, G1MotionTwistCtrlCfg]] = [
         G1TwistRedisCtrlCfg(redis_host="localhost"),  # with hign level motion lib through redis
         # G1MotionTwistCtrlCfg(), # with built-in motion ctrl
     ]
@@ -363,7 +388,10 @@ class g1_switch_beyondmimic(RlMultiPolicyPipelineCfg): # Sim2Sim
 
     robot: str = "g1"
     env: G1MujocoEnvCfg = G1MujocoEnvCfg()
-    ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+
+    # py3.10 -> py3.8
+    # ctrl: list[KeyboardCtrlCfg | JoystickCtrlCfg] = [
+    ctrl: List[Union[KeyboardCtrlCfg, JoystickCtrlCfg]] = [
         KeyboardCtrlCfg(
             triggers_extra={
                 "Key.tab": "[POLICY_TOGGLE]",

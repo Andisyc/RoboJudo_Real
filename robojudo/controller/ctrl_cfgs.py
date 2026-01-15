@@ -1,3 +1,4 @@
+from __future__ import annotations
 from robojudo.config import ASSETS_DIR, Config
 
 

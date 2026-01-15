@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from pydantic import field_validator, model_validator
 
 from robojudo.config import ASSETS_DIR, Config
@@ -23,7 +25,10 @@ class PolicyCfg(Config):
 
     # action post processing
     action_scale: float = 1.0
-    action_clip: float | None = None  # clip action to [-action_clip, action_clip]
+
+    # py3.10 -> py3.8
+    # action_clip: float | None = None  # clip action to [-action_clip, action_clip]
+    action_clip: Optional[float] = None
     action_beta: float = 1.0  # action smoothing factor
 
     # history settings

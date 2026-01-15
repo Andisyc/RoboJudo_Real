@@ -1,8 +1,10 @@
+from typing import Optional, Dict
 from robojudo.config import cfg_registry
 
 
 class ConfigManager:
-    def __init__(self, config_name: str, override_cfg: dict | None = None):
+    # def __init__(self, config_name: str, override_cfg: dict | None = None): # py3.10
+    def __init__(self, config_name: str, override_cfg: Optional[dict] = None): # py3.8
         self.config_name = config_name # g1_locomimic_beyondmimic
         self.override_cfg = override_cfg
         self.cfg = self.parse_config()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import List, Union
 from robojudo.config import cfg_registry
 from robojudo.controller.ctrl_cfgs import (
     JoystickCtrlCfg,  # noqa: F401
@@ -28,7 +30,9 @@ class h1_dev(RlPipelineCfg):
     robot: str = "h1"
     env: H1MujocoEnvCfg = H1MujocoEnvCfg()
 
-    ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [
+    # py3.10 -> py3.8
+    # ctrl: list[JoystickCtrlCfg | KeyboardCtrlCfg] = [
+    ctrl: List[Union[JoystickCtrlCfg, KeyboardCtrlCfg]] = [
         JoystickCtrlCfg(),
         KeyboardCtrlCfg(),
     ]

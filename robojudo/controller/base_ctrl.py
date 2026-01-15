@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from abc import ABC, abstractmethod
 
 from robojudo.environment import Environment
@@ -10,7 +12,9 @@ class Controller(ABC):
     Base Controller Module
     """
 
-    def __init__(self, cfg_ctrl: CtrlCfg, env: Environment | None = None, device: str = "cpu"):
+    # py3.10 -> py3.8
+    # def __init__(self, cfg_ctrl: CtrlCfg, env: Environment | None = None, device: str = "cpu"): # py3.10
+    def __init__(self, cfg_ctrl: CtrlCfg, env: Optional[Environment] = None, device: str = "cpu"): # py3.8
         self.cfg_ctrl = cfg_ctrl
         self.env = env  # type: ignore
         self.device = device

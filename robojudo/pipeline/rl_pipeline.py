@@ -243,12 +243,12 @@ class RlPipeline(Pipeline):
             total_ms = (t5 - t0) * 1000
             # 只有当总耗时超过 15ms 时才打印，避免刷屏 (目标是 20ms)
             if total_ms > 15.0:
-                print(f"rl_pipeline Total: {total_ms:.2f}ms | "
-                    f"ReadEnv: {(t1-t0)*1000:.2f}ms | "   # 0.03 ~ 0.07 ms
-                    f"infer: {(t2-t1)*1000:.2f}ms | "     # 0.07 ~ 0.11 ms
-                    f"envstep: {(t3-t2)*1000:.2f}ms | "   # 47.8 ~ 100 ms
-                    f"sendmotor: {(t4-t3)*1000:.2f}ms | " # 3.37 ~ 6.04 ms
-                    f"post: {(t5-t4)*1000:.2f}ms")        # 26.6 ~ 57.3 ms
+                print(f"rl_pipeline Total: {total_ms:.2f}ms | " #  G1      | 5090gpu | 5090cpu
+                    f"ReadEnv: {(t1-t0)*1000:.2f}ms | "   # 0.03 ~ 0.07 ms | 0.01 ms | 0.01 ms
+                    f"infer: {(t2-t1)*1000:.2f}ms | "     # 0.07 ~ 0.11 ms | 0.02 ms | 0.02 ms
+                    f"envstep: {(t3-t2)*1000:.2f}ms | "   # 47.8 ~ 100 ms  | 2.30 ms | 2.30 ms
+                    f"sendmotor: {(t4-t3)*1000:.2f}ms | " # 3.37 ~ 6.04 ms | 0.79 ms | 0.79 ms
+                    f"post: {(t5-t4)*1000:.2f}ms")        # 26.6 ~ 57.3 ms | 17.1 ms | 17.1 ms
             print("\n")
 
             # reset obs, policy, ctrl buffer at 900 steps

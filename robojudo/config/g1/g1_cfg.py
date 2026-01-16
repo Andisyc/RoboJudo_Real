@@ -104,7 +104,7 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
     """
     robot: str = "g1"
 
-    device: str = "cuda:0"
+    # device: str = "cuda:0"
 
     # env: G1DummyEnvCfg = G1DummyEnvCfg()
     env: G1RealEnvCfg = G1RealEnvCfg(

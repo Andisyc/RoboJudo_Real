@@ -142,7 +142,27 @@ class UnitreeEnv(Environment):
         # born place alignment extra for h1 torso
         if self.robot == "h1":
             self.torso_align = TransformAlignment()
+        
+        # === [新增] 性能优化：预分配内存 ===
+        # 根据实际关节数分配固定内存
+        self._dof_pos = np.zeros(self.num_dofs, dtype=np.float32)
+        self._dof_vel = np.zeros(self.num_dofs, dtype=np.float32)
 
+        # 预计算关节索引映射，避免在 update 里做 if else 判断
+        # 如果没有指定映射，就用 0 ~ num_dofs
+        if self._dof_idx is None:
+            self._map_dof_idx = list(range(self.num_dofs))
+        else:
+            self._map_dof_idx = self._dof_idx
+
+        # 预分配 IMU 缓存
+        self._base_quat = np.zeros(4, dtype=np.float32)
+        self._base_ang_vel = np.zeros(3, dtype=np.float32)
+        self._base_rpy = np.zeros(3, dtype=np.float32)
+        # =================================
+
+        # update()在self_check()被调用
+        # 性能初始化需在self_check()之前
         self.self_check()
 
     def wait_for_low_state(self):
@@ -199,6 +219,7 @@ class UnitreeEnv(Environment):
     def LowStateGoHandler(self, msg: LowStateGo):
         self.low_state = msg
 
+    
     def update(self):
         # robot state
         dof_pos = []
@@ -217,6 +238,7 @@ class UnitreeEnv(Environment):
         self._dof_pos = dof_pos
         self._dof_vel = dof_vel
 
+        # read in imu info
         if self.robot == "g1":
             quat = np.array(self.low_state.imu_state.quaternion, dtype=np.float32)[[1, 2, 3, 0]]
             ang_vel = np.array(self.low_state.imu_state.gyroscope, dtype=np.float32)
@@ -248,8 +270,7 @@ class UnitreeEnv(Environment):
                 waist_yaw=waist_yaw,
                 waist_yaw_omega=waist_yaw_omega,
                 imu_quat=torso_quat[[3, 0, 1, 2]],
-                imu_omega=torso_ang_vel,
-            )
+                imu_omega=torso_ang_vel,)
 
             self._base_quat = base_quat[[1, 2, 3, 0]]
             self._base_ang_vel = base_ang_vel
@@ -283,6 +304,90 @@ class UnitreeEnv(Environment):
         # controller
         if self.RemoteControllerHandler:
             self.RemoteControllerHandler(self.low_state.wireless_remote)
+    
+    """
+    def update(self): # performance optimize
+        # === [优化版] 零内存分配读取 ===
+        
+        # 1. 读取电机状态 (避免创建 list 和 numpy array)
+        ms = self.low_state.motor_state
+        # 直接通过索引映射填入预分配的数组
+        for i, motor_id in enumerate(self._map_dof_idx):
+            # 注意：这里假设 ms 是可索引的，或者 ms 足够长
+            state = ms[motor_id]
+            self._dof_pos[i] = state.q
+            self._dof_vel[i] = state.dq
+        
+        # 2. 读取 IMU (避免切片产生的拷贝)
+        if self.robot == "g1":
+            imu = self.low_state.imu_state
+            
+            # 手动重排 quaternion: [w, x, y, z] -> [x, y, z, w]
+            # 原始代码: quat = np.array(...)[[1, 2, 3, 0]]
+            q = imu.quaternion
+            self._base_quat[0] = q[1]
+            self._base_quat[1] = q[2]
+            self._base_quat[2] = q[3]
+            self._base_quat[3] = q[0]
+
+            # 直接填入角速度
+            gyro = imu.gyroscope
+            self._base_ang_vel[0] = gyro[0]
+            self._base_ang_vel[1] = gyro[1]
+            self._base_ang_vel[2] = gyro[2]
+            
+            # 直接填入 RPY
+            rpy = imu.rpy
+            self._base_rpy[0] = rpy[0]
+            self._base_rpy[1] = rpy[1]
+            self._base_rpy[2] = rpy[2]
+
+            if self.born_place_align:
+                # 注意：align_quat 通常会返回新数组，这里尽量优化，或者暂时接受
+                # 如果 align_quat 可以原地修改更好，如果不行，这里会有一次拷贝
+                self._base_quat[:] = self.base_align.align_quat(self._base_quat)
+
+        elif self.robot == "h1":
+            # H1 的逻辑稍微复杂，但也可以用类似方法优化
+            # 暂时保留原逻辑，但建议用类似 G1 的方式手动提取 imu 数据
+            # ... (如果你的机器人是 G1，H1 分支不会执行，可以暂时不动)
+            pass
+
+        # 3. Odometry (保持原样，通常开销不大)
+        if self._odometry_type == "ZED":
+            self.zed_odometry.update()
+            if self.zed_odometry.is_valid:
+                self._base_pos = self.zed_odometry.pos
+                self._lin_vel = self.zed_odometry.lin_vel
+        elif self._odometry_type == "DUMMY":
+            self._base_pos[:] = [0.0, 0.0, 0.8]
+            self._base_lin_vel[:] = 0.0
+        elif self._odometry_type == "UNITREE":
+            # 优化：避免反复创建 array
+            # 这里假设 sport_state 已经准备好
+            pos = self.sport_state.position
+            vel = self.sport_state.velocity
+            
+            # 这是一个计算函数，会有计算开销，但比内存分配快
+            self._base_lin_vel = quat_rotate_inverse_np(self._base_quat, np.array(vel))
+            
+            if self.born_place_align:
+                self._base_pos = self.base_align.align_pos(np.array(pos))
+            else:
+                self._base_pos[:] = pos
+
+        # 4. FK (Forward Kinematics)
+        if self.update_with_fk:
+            fk_info = self.fk()
+            self._torso_pos = fk_info[self._torso_name]["pos"]
+            if self.robot != "h1":
+                self._torso_quat = fk_info[self._torso_name]["quat"]
+                self._torso_ang_vel = fk_info[self._torso_name]["ang_vel"]
+
+        # 5. Controller Handler
+        if self.RemoteControllerHandler:
+            self.RemoteControllerHandler(self.low_state.wireless_remote)
+    """
 
     def step(self, pd_target, hand_pose=None):
         assert len(pd_target) == self.num_dofs, "pd_target len should be num_dofs of env"

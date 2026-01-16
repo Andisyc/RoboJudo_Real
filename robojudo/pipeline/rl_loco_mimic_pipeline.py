@@ -199,14 +199,28 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         env_class: type[Environment] = getattr(robojudo.environment, self.cfg.env.env_type)
         self.env: Environment = env_class(cfg_env=self.cfg.env, device=self.device)
 
-        print("\n")
-        print(f"RlLocoMimicPipeline: {self.device}")
-        print("\n")
+        # print("\n")
+        # print(f"RlLocoMimicPipeline: {self.device}")
+        # print("\n")
+        # print(f"self.cfg.env: {self.cfg.env}")
+        # print("\n")
+        # print(f"self.env: {self.env}")
+        # print("\n")
         # temp = 1
         # assert temp == 2
 
         # load in controller (keyboard or joystick)
         self.ctrl_manager = CtrlManager(cfg_ctrls=self.cfg.ctrl, env=self.env, device=self.device)
+
+        # print("\n")
+        # print(f"self.cfg.ctrl: {self.cfg.ctrl}")
+        # print("\n")
+        # print(f"self.ctrl_manager: {self.ctrl_manager}")
+        # print("\n")
+        # print(f"self.device: {self.device}")
+        # print("\n")
+        # temp = 1
+        # assert temp == 2
 
         # upper body override
         self.num_upper_body_dof = self.cfg.upper_dof_num
@@ -228,6 +242,12 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
             env=self.env,
             loco_dof_pos=self.loco_dof_pos,
             device=self.device,)
+        
+        # print("\n")
+        # print(f"self.policy: {self.policy}")
+        # print("\n")
+        # temp = 1
+        # assert temp == 2
         
         # load in dof_cfg & mujoco
         # (dummy & unitree visualizer=None)
@@ -252,7 +272,7 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         for callback in extras.get("CALLBACK", []):
             # match callback:
                 # case "[MOTION_DONE]":
-            if command == "[MOTION_DONE]":
+            if commands == "[MOTION_DONE]":
                 if self.policy_locomotion_mimic_flag == 1:
                     commands.append("[POLICY_LOCO]")
                     logger.info("Mimic motion done, switch to locomotion policy.")
@@ -375,17 +395,19 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
         # 打印到控制台耗时
         t6 = time.perf_counter()
 
+        """
         # === [新增] 打印详细耗时分析 ===
         total_ms = (t6 - t0) * 1000
         # 只有当总耗时超过 15ms 时才打印，避免刷屏 (目标是 20ms)
         if total_ms > 15.0:
-            print(f"rl_loco_mimic Total: {total_ms:.2f}ms | " # 60 ~ 106 ms
-                  f"ReadEnv: {(t1-t0)*1000:.2f}ms | "         # 4 ~ 57 ms
-                  f"GetCtrl: {(t2-t1)*1000:.2f}ms | "         # 5 ~ 11 ms
-                  f"MakeObs: {(t3-t2)*1000:.2f}ms | "         # 11 ~ 32 ms
-                  f"Infer: {(t4-t3)*1000:.2f}ms | "           # 16 ~ 28 ms
-                  f"WriteEnv: {(t5-t4)*1000:.2f}ms | "        # 0.02 ~ 0.05 ms
-                  f"Post: {(t6-t5)*1000:.2f}ms")              # 0.22 ~ 0.35 ms
+            print(f"rl_loco_mimic Total: {total_ms:.2f}ms | " # 60 ~ 106 ms    | 33 ~ 70 ms
+                  f"ReadEnv: {(t1-t0)*1000:.2f}ms | "         # 4 ~ 57 ms      | 7 ~ 42 ms
+                  f"GetCtrl: {(t2-t1)*1000:.2f}ms | "         # 5 ~ 11 ms      | 2 ~ 8 ms
+                  f"MakeObs: {(t3-t2)*1000:.2f}ms | "         # 11 ~ 32 ms     | 
+                  f"Infer: {(t4-t3)*1000:.2f}ms | "           # 16 ~ 28 ms     | 
+                  f"WriteEnv: {(t5-t4)*1000:.2f}ms | "        # 0.02 ~ 0.05 ms | 
+                  f"Post: {(t6-t5)*1000:.2f}ms")              # 0.22 ~ 0.35 ms | 
+        """
 
     # invoke prepare() from RlPipeline
     def prepare(self):

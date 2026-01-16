@@ -1,6 +1,6 @@
 import logging
 import time
-
+import torch
 import numpy as np
 from box import Box
 
@@ -19,9 +19,7 @@ from robojudo.utils.util_func import get_gravity_orientation
 logger = logging.getLogger(__name__)
 
 
-class PolicyWrapper:
-    """A wrapper for Policy to handle observation and action adaptation."""
-
+class PolicyWrapper: # A wrapper for Policy to handle observation and action adaptation.
     def __init__(self, cfg_policy: PolicyCfg, env_dof_cfg: DoFConfig, device: str):
         self.env_dof_cfg = env_dof_cfg
 
@@ -56,10 +54,119 @@ class PolicyWrapper:
     def get_init_dof_pos(self):
         return self.actions_adapter.fit(self.policy.get_init_dof_pos(), template=self.env_dof_cfg.default_pos)
 
-    def __getattr__(self, name):
-        """Fallback: delegate other func to the wrapped policy."""
+    def __getattr__(self, name): # Fallback: delegate other func to the wrapped policy.
         return getattr(self.policy, name)
 
+"""
+class PolicyWrapper: # Optimized PolicyWrapper for End-to-End GPU execution
+    def __init__(self, cfg_policy: PolicyCfg, env_dof_cfg: DoFConfig, device: str):
+        self.device = torch.device(device)
+        self.env_dof_cfg = env_dof_cfg
+
+        # 1. 初始化 Policy
+        policy_type = cfg_policy.policy_type
+        policy_name = policy_type
+        if hasattr(cfg_policy, "policy_name"):
+            policy_name += "@" + cfg_policy.policy_name
+        self.name = policy_name
+
+        policy_class: type[Policy] = getattr(robojudo.policy, policy_type)
+        self.policy: Policy = policy_class(cfg_policy=cfg_policy, device=device)
+
+        # 2. [GPU优化] 预计算索引映射
+        env_names = env_dof_cfg.joint_names
+        policy_obs_names = self.policy.cfg_obs_dof.joint_names
+        policy_act_names = self.policy.cfg_action_dof.joint_names
+
+        # Obs: Env -> Policy
+        obs_indices = [env_names.index(name) for name in policy_obs_names]
+        self.obs_dof_indices = torch.tensor(obs_indices, device=self.device, dtype=torch.long)
+
+        # Action: Policy -> Env
+        action_indices = [policy_act_names.index(name) for name in env_names]
+        self.action_dof_indices = torch.tensor(action_indices, device=self.device, dtype=torch.long)
+
+        # 3. 预加载常量
+        self.policy_default_pos = torch.tensor(
+            self.policy.default_pos, device=self.device, dtype=torch.float32)
+        
+        # [保留] 用于 get_init_dof_pos 的 CPU 适配器 (非性能关键)
+        self.obs_adapter = DoFAdapter(env_names, policy_obs_names)
+        self.actions_adapter = DoFAdapter(policy_act_names, env_names)
+
+    def get_observation(self, env_data: dict, ctrl_data: dict):
+        
+        # # 零拷贝 GPU 处理
+        # # 假设 env_data 里的 dof_pos/vel 已经是 numpy, 这里转 Tensor
+        # # (如果在 Env 里已经优化成 Tensor 更好，这里为了兼容假设是 Numpy)
+        # if isinstance(env_data["dof_pos"], np.ndarray):
+        #     dof_pos = torch.from_numpy(env_data["dof_pos"]).to(self.device, non_blocking=True)
+        #     dof_vel = torch.from_numpy(env_data["dof_vel"]).to(self.device, non_blocking=True)
+        #     base_ang_vel = torch.from_numpy(env_data["base_ang_vel"]).to(self.device, non_blocking=True)
+        #     base_quat = torch.from_numpy(env_data["base_quat"]).to(self.device, non_blocking=True)
+        # else:
+        #     # 已经是 Tensor
+        #     dof_pos = env_data["dof_pos"]
+        #     dof_vel = env_data["dof_vel"]
+        #     base_ang_vel = env_data["base_ang_vel"]
+        #     base_quat = env_data["base_quat"]
+
+        # # Adapter (Index Select)
+        # dof_pos_adapted = dof_pos[self.obs_dof_indices]
+        # dof_vel_adapted = dof_vel[self.obs_dof_indices]
+
+        # # 构造轻量级 Tensor 字典传给 Policy
+        # env_data_tensor = {
+        #     "dof_pos": dof_pos_adapted,
+        #     "dof_vel": dof_vel_adapted,
+        #     "base_ang_vel": base_ang_vel,
+        #     "base_quat": base_quat,}
+        
+        # # [新增] 转发 BeyondMimicPolicy 需要的额外字段
+        # # 自动将 numpy 转为 tensor, 如果 key 存在的话
+        # extra_keys = ["base_lin_vel", "base_pos", "torso_pos", "torso_quat"]
+        # for key in extra_keys:
+        #     if key in env_data:
+        #         val = env_data[key]
+        #         if isinstance(val, np.ndarray):
+        #             env_data_tensor[key] = torch.from_numpy(val).to(self.device, non_blocking=True)
+        #         else:
+        #             env_data_tensor[key] = val
+        
+        # return self.policy.get_observation(env_data_tensor, ctrl_data)
+        
+        return self.policy.get_observation(env_data, ctrl_data)
+
+    def get_action(self, obs):
+        # 输出纯 Tensor action
+        action = self.policy.get_action(obs)
+
+        # 如果 action 是 Tensor，转回 Numpy (为了后续兼容)
+        if isinstance(action, torch.Tensor):
+            action = action.detach().cpu().numpy()
+        
+        # 执行 Adapter (CPU)
+        return self.actions_adapter.fit(action)
+        # return action[self.action_dof_indices]
+
+    def get_pd_target(self, obs):
+        # 核心控制流：全 GPU 计算
+        action = self.policy.get_action(obs)
+        pd_target = action + self.policy_default_pos
+        
+        # 重排回 Env 顺序
+        pd_target_env = pd_target[self.action_dof_indices]
+        
+        # 唯一的一次 GPU->CPU 回传 (给电机)
+        return pd_target_env.cpu().numpy()
+
+    def get_init_dof_pos(self):
+        # 保持原样，只用于初始化
+        return self.actions_adapter.fit(self.policy.get_init_dof_pos(), template=self.env_dof_cfg.default_pos)
+
+    def __getattr__(self, name):
+        return getattr(self.policy, name)
+"""
 
 @pipeline_registry.register
 class RlPipeline(Pipeline):
@@ -233,24 +340,25 @@ class RlPipeline(Pipeline):
             if time_diff > 0:
                 time.sleep(time_diff)
             else:
-                logger.error(f"Warning: frame drop: self.freq: {self.freq}, self.dt: {self.dt}, time_diff: {time_diff}") # dt = 0.02, 0.02 x 1000 = 20ms
+                logger.error(f"Warning: frame drop: time_diff: {time_diff}") # dt = 0.02, 0.02 x 1000 = 20ms # self.freq: {self.freq}, self.dt: {self.dt}, 
             last_step_time = time.time()
-            pbar.update()
+            if t % 50 == 0: pbar.update(50)
 
             t5 = time.perf_counter()
-
+            """
             # === [新增] 打印详细耗时分析 ===
             total_ms = (t5 - t0) * 1000
             # 只有当总耗时超过 15ms 时才打印，避免刷屏 (目标是 20ms)
             if total_ms > 15.0:
-                print(f"rl_pipeline Total: {total_ms:.2f}ms | " #  G1      | 5090gpu | 5090cpu
-                    f"ReadEnv: {(t1-t0)*1000:.2f}ms | "   # 0.03 ~ 0.07 ms | 0.01 ms | 0.01 ms
-                    f"infer: {(t2-t1)*1000:.2f}ms | "     # 0.07 ~ 0.11 ms | 0.02 ms | 0.02 ms
-                    f"envstep: {(t3-t2)*1000:.2f}ms | "   # 47.8 ~ 100 ms  | 2.30 ms | 2.30 ms
-                    f"sendmotor: {(t4-t3)*1000:.2f}ms | " # 3.37 ~ 6.04 ms | 0.79 ms | 0.79 ms
-                    f"post: {(t5-t4)*1000:.2f}ms")        # 26.6 ~ 57.3 ms | 17.1 ms | 17.1 ms
+                print(
+                f"rl_pipeline Total: {total_ms:.2f}ms | "   #  G1      | 5090gpu | 5090cpu
+                f"ReadEnv: {(t1-t0)*1000:.2f}ms | "   # 0.03 ~ 0.07 ms | 0.01 ms | 0.01 ms
+                f"infer: {(t2-t1)*1000:.2f}ms | "     # 0.07 ~ 0.11 ms | 0.02 ms | 0.02 ms
+                f"envstep: {(t3-t2)*1000:.2f}ms | "   # 47.8 ~ 100 ms  | 2.30 ms | 2.30 ms
+                f"sendmotor: {(t4-t3)*1000:.2f}ms | " # 3.37 ~ 6.04 ms | 0.79 ms | 0.79 ms
+                f"post: {(t5-t4)*1000:.2f}ms")        # 26.6 ~ 57.3 ms | 17.1 ms | 17.1 ms
             print("\n")
-
+            """
             # reset obs, policy, ctrl buffer at 900 steps
             # since at 900 steps robot already reach init state
             if t == 0.9 * traj_len:

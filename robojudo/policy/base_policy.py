@@ -44,7 +44,11 @@ class Policy(ABC):
         self.action_clip = self.cfg_policy.action_clip
         self.action_beta = self.cfg_policy.action_beta
 
+        # 修改前: 在 CPU 上计算
         self.last_action = np.zeros(self.num_actions)
+
+        # 修改后: 直接在 GPU 上初始化
+        # self.last_action = torch.zeros(self.num_actions, device=self.device, dtype=torch.float32)
 
         self.history_length = self.cfg_policy.history_length
         self.history_obs_size = self.cfg_policy.history_obs_size
@@ -86,7 +90,50 @@ class Policy(ABC):
 
         processed_actions = processed_actions * self.action_scale
         return processed_actions
+    
+    """
+    def get_action(self, obs: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+        # 1. 处理输入：如果是 NumPy，转为 Tensor；如果是 Tensor，直接用
+        if isinstance(obs, np.ndarray):
+            obs_tensor = torch.from_numpy(obs).unsqueeze(0).float().to(self.device)
+        else:
+            # 已经是 Tensor (来自优化后的 PolicyWrapper)
+            # 如果维度是 (Obs_Dim,)，增加一个 Batch 维度 -> (1, Obs_Dim)
+            if obs.ndim == 1:
+                obs_tensor = obs.unsqueeze(0)
+            else:
+                obs_tensor = obs
 
+        # 2. 模型推理 (纯 GPU)
+        with torch.no_grad():
+            actions_tensor = self.model(obs_tensor)
+
+        # 3. 后处理 (滤波 & 限幅) - 全程 GPU 计算
+        # 移除 batch 维度: (1, Act_Dim) -> (Act_Dim,)
+        actions = actions_tensor.squeeze(0)
+
+        # 确保 last_action 也是 Tensor (防止 reset 中被重置为 numpy)
+        if isinstance(self.last_action, np.ndarray):
+             self.last_action = torch.from_numpy(self.last_action).float().to(self.device)
+
+        # 低通滤波 (EMA)
+        actions = (1 - self.action_beta) * self.last_action + self.action_beta * actions
+        
+        # 更新 last_action (保持在 GPU)
+        self.last_action = actions.clone()
+
+        processed_actions = actions
+        
+        # 限幅 (使用 torch.clamp 替代 np.clip)
+        if self.action_clip is not None:
+            processed_actions = torch.clamp(processed_actions, -self.action_clip, self.action_clip)
+
+        processed_actions = processed_actions * self.action_scale
+        
+        # 4. 直接返回 Tensor
+        # (PolicyWrapper 会在最后一步 get_pd_target 中统一转回 CPU)
+        return processed_actions
+    """
     def get_init_dof_pos(self) -> np.ndarray:
         """
         Return the initial dof pos for the policy, used for robot preparation.

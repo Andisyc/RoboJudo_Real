@@ -66,9 +66,10 @@ class g1(RlPipelineCfg): # Sim2Sim
         # KeyboardCtrlCfg(),
     ]
 
-    policy: G1UnitreePolicyCfg = G1UnitreePolicyCfg()
+    # policy: G1UnitreePolicyCfg = G1UnitreePolicyCfg()
     # policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
     # policy: G1AmoPolicyCfg = G1AmoPolicyCfg()
+    policy: G1AsapLocoPolicyCfg = G1AsapLocoPolicyCfg()
 
     # run_fullspeed: bool = env.is_sim
 
@@ -117,23 +118,60 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
 
     # py3.10 -> py3.8
     # ctrl: list[UnitreeCtrlCfg | JoystickCtrlCfg] = [
-    ctrl: List[Union[UnitreeCtrlCfg, JoystickCtrlCfg]] = [
-        UnitreeCtrlCfg(),
-        # "A": "[SHUTDOWN]", # damping
-        # "X": "[MOTION_FADE_IN]",
-        # "B": "[MOTION_FADE_OUT]",
-        # "Y": "[MOTION_RESET]",
+    
+    # ctrl: List[Union[UnitreeCtrlCfg, JoystickCtrlCfg]] = [
+    #     UnitreeCtrlCfg(),
+    #     # "A": "[SHUTDOWN]", # damping
+    #     # "X": "[MOTION_FADE_IN]",
+    #     # "B": "[MOTION_FADE_OUT]",
+    #     # "Y": "[MOTION_RESET]",
+    #     JoystickCtrlCfg(
+    #         triggers_extra={
+    #             "RB+Down": "[POLICY_LOCO]",
+    #             "RB+Up": "[POLICY_MIMIC]",
+    #             "RB+Left": "[POLICY_SWITCH],LAST",
+    #             "RB+Right": "[POLICY_SWITCH],NEXT",
+    #         }
+    #     ),
+    # ]
+
+    ctrl: List[Union[JoystickCtrlCfg]] = [
         JoystickCtrlCfg(
             triggers_extra={
                 "RB+Down": "[POLICY_LOCO]",
                 "RB+Up": "[POLICY_MIMIC]",
+                "RB+Left": "[POLICY_SWITCH],LAST",
+                "RB+Right": "[POLICY_SWITCH],NEXT",
             }
         ),
     ]
 
-    loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
+    # ctrl: List[Union[KeyboardCtrlCfg, JoystickCtrlCfg]] = [
+    #     KeyboardCtrlCfg(
+    #         triggers_extra={
+    #             "i": "[SIM_REBORN]",
+    #             "o": "[SHUTDOWN]",
+    #             "]": "[POLICY_LOCO]",
+    #             "[": "[POLICY_MIMIC]",
+    #             ";": "[POLICY_SWITCH],NEXT",
+    #             "'": "[POLICY_SWITCH],LAST",
+    #         }
+    #     ),
+    #     JoystickCtrlCfg(
+    #         triggers_extra={
+    #             "RB+Down": "[POLICY_LOCO]",
+    #             "RB+Up": "[POLICY_MIMIC]",
+    #         }
+    #     ),
+    # ]
+
+    # loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
+    # loco_policy: G1AmoPolicyCfg = G1AmoPolicyCfg()
+    loco_policy: G1AsapLocoPolicyCfg = G1AsapLocoPolicyCfg()
     mimic_policies: list[G1BeyondMimicPolicyCfg] = [
-        G1BeyondMimicPolicyCfg(policy_name="g1_dance2", without_state_estimator=False, max_timestep=1000),
+        # G1BeyondMimicPolicyCfg(policy_name="g1_dance2", without_state_estimator=False, max_timestep=1000),
+        G1BeyondMimicPolicyCfg(policy_name="wave-single-2-lz", without_state_estimator=False, max_timestep=400),
+        G1BeyondMimicPolicyCfg(policy_name="intro-facing-2-lz", without_state_estimator=False, max_timestep=300),
     ]
 
     do_safety_check: bool = True  # enable safety check for real robot

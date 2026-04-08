@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import time
@@ -231,7 +233,8 @@ class AsapLocoPolicy(Policy):
         return np.array([phase_time])
 
     def _get_obs_history(self):
-        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
+        # history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
+        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf)]
         return np.concatenate(history_list, axis=0)
 
     def get_observation(self, env_data, ctrl_data):
@@ -339,6 +342,7 @@ class AsapLocoPolicy(Policy):
                 button_event = ctrl_data[key]["button_event"]
                 for event in button_event:
                     if event["type"] == "button" and event["pressed"]:
+                        """
                         match event["name"]:
                             case "Left":
                                 self.stand_command = 1 - self.stand_command
@@ -350,10 +354,22 @@ class AsapLocoPolicy(Policy):
                                 self.base_height_command[0] += 0.05
                             case "Down":
                                 self.base_height_command[0] -= 0.05
+                        """
+                        if event["name"] == "Left":
+                            self.stand_command = 1 - self.stand_command
+                            if self.stand_command == 0:
+                                self.ang_vel_command[0] = 0.0
+                                self.lin_vel_command[0] = 0.0
+                                self.lin_vel_command[1] = 0.0
+                        elif event["name"] == "Up":
+                            self.base_height_command[0] += 0.05
+                        elif event["name"] == "Down":
+                            self.base_height_command[0] -= 0.05
                 break
             elif key == "KeyboardCtrl":
                 for event in ctrl_data[key]["keyboard_event"]:
                     if event["type"] == "keyboard" and event["pressed"]:
+                        """
                         match event["name"]:
                             case "w":
                                 self.lin_vel_command[0] += 0.1 if self.stand_command else 0.0
@@ -381,6 +397,33 @@ class AsapLocoPolicy(Policy):
                                     self.ang_vel_command[0] = 0.0
                                     self.lin_vel_command[0] = 0.0
                                     self.lin_vel_command[1] = 0.0
+                        """
+                        if event["name"] == "w":
+                            self.lin_vel_command[0] += 0.1 if self.stand_command else 0.0
+                        elif event["name"] == "s":
+                            self.lin_vel_command[0] -= 0.1 if self.stand_command else 0.0
+                        elif event["name"] ==  "a":
+                            self.lin_vel_command[1] += 0.1 if self.stand_command else 0.0
+                        elif event["name"] ==  "d":
+                            self.lin_vel_command[1] -= 0.1 if self.stand_command else 0.0
+                        elif event["name"] ==  "q":
+                            self.ang_vel_command[0] -= 0.1
+                        elif event["name"] ==  "e":
+                            self.ang_vel_command[0] += 0.1
+                        elif event["name"] ==  "z":
+                            self.ang_vel_command[0] = 0.0
+                            self.lin_vel_command[0] = 0.0
+                            self.lin_vel_command[1] = 0.0
+                        elif event["name"] ==  "1":
+                            self.base_height_command += 0.05
+                        elif event["name"] ==  "2":
+                            self.base_height_command -= 0.05
+                        elif event["name"] ==  "=":
+                            self.stand_command = 1 - self.stand_command
+                            if self.stand_command == 0:
+                                self.ang_vel_command[0] = 0.0
+                                self.lin_vel_command[0] = 0.0
+                                self.lin_vel_command[1] = 0.0
 
     def debug_viz(self, visualizer: MujocoVisualizer, env_data, ctrl_data, extras):
         base_pos = env_data["base_pos"]

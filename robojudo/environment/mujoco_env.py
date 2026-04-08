@@ -1,3 +1,4 @@
+from typing import Optional
 import logging
 import time
 
@@ -78,7 +79,8 @@ class MujocoEnv(Environment):
     def self_check(self):
         pass
 
-    def set_born_place(self, quat: np.ndarray | None = None, pos: np.ndarray | None = None):
+    # def set_born_place(self, quat: np.ndarray | None = None, pos: np.ndarray | None = None):
+    def set_born_place(self, quat: Optional[np.ndarray] = None, pos: Optional[np.ndarray] = None):
         quat_ = self.base_quat if quat is None else quat
         pos_ = self.base_pos if pos is None else pos
         super().set_born_place(quat_, pos_)

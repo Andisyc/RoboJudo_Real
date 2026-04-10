@@ -1,10 +1,7 @@
+from __future__ import annotations
+
 import time
 from queue import Empty, Queue
-from threading import Thread
-
-import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import Joy
 
 from robojudo.controller import Controller, ctrl_registry
 from robojudo.controller.ctrl_cfgs import JoystickCtrlCfg
@@ -39,6 +36,71 @@ JOY_BUTTON_MAP = {
 }
 
 
+def _joy_subscriber_process(data_queue):
+    """
+    Runs in a separate process to avoid DDS domain conflicts with the main process
+    (e.g. Unitree SDK's internal CycloneDDS participant).
+    Subscribes to /joy and puts parsed data into data_queue.
+    """
+    import rclpy
+    from rclpy.node import Node
+    from sensor_msgs.msg import Joy
+    import time as _time
+
+    class _JoyNode(Node):
+        def __init__(self):
+            super().__init__('joystick_ctrl_subscriber')
+            self.last_buttons = None
+            self.create_subscription(Joy, '/joy', self._cb, 10)
+
+        def _cb(self, msg):
+            now = _time.time()
+
+            axes = {name: 0.0 for name in JOY_AXIS_MAP.values()}
+            for i, v in enumerate(msg.axes):
+                if i in JOY_AXIS_MAP:
+                    axes[JOY_AXIS_MAP[i]] = float(v)
+
+            current_buttons = list(msg.buttons)
+            if self.last_buttons is None:
+                self.last_buttons = [0] * len(current_buttons)
+
+            button_events = []
+            for i, pressed in enumerate(current_buttons):
+                if i < len(self.last_buttons) and pressed != self.last_buttons[i]:
+                    if i in JOY_BUTTON_MAP:
+                        button_events.append({
+                            "type": "button",
+                            "name": JOY_BUTTON_MAP[i],
+                            "pressed": bool(pressed),
+                            "timestamp": now,
+                        })
+            self.last_buttons = current_buttons
+
+            # Keep only the latest frame (drop stale entries)
+            while not data_queue.empty():
+                try:
+                    data_queue.get_nowait()
+                except Exception:
+                    break
+            try:
+                data_queue.put_nowait({
+                    "axes": axes,
+                    "button_event": button_events,
+                    "timestamp": now,
+                })
+            except Exception:
+                pass
+
+    rclpy.init()
+    node = _JoyNode()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 @ctrl_registry.register
 class JoystickCtrl(Controller):
     cfg_ctrl: JoystickCtrlCfg
@@ -65,52 +127,26 @@ class JoystickCtrl(Controller):
         self.reset()
 
     def init_ros(self):
-        """Initializes the ROS2 subscriber in a background thread."""
-        self._last_joy_buttons = None
-        try:
-            if not rclpy.ok():
-                rclpy.init()
-            self.ros_node = Node('joystick_ctrl_subscriber')
-            self.ros_sub = self.ros_node.create_subscription(
-                Joy,
-                '/joy',
-                self._ros_cmd_callback,
-                10)
-            self.ros_thread = Thread(target=rclpy.spin, args=(self.ros_node,), daemon=True)
-            self.ros_thread.start()
-            print("[JoystickCtrl] ROS2 subscriber initialized for /joy (sensor_msgs/Joy).")
-        except Exception as e:
-            print(f"[JoystickCtrl] ROS2 initialization skipped or failed: {e}")
+        """
+        Starts the ROS2 Joy subscriber in a separate subprocess to avoid
+        DDS domain conflicts with the main process (Unitree SDK uses its
+        own CycloneDDS participant which conflicts with rclpy in-process).
 
-    def _ros_cmd_callback(self, msg: Joy):
-        """Convert incoming Joy message to internal axes+button-event format."""
-        now = time.time()
-
-        # Convert indexed axes to named dict
-        axes = {name: 0.0 for name in JOY_AXIS_MAP.values()}
-        for i, value in enumerate(msg.axes):
-            if i in JOY_AXIS_MAP:
-                axes[JOY_AXIS_MAP[i]] = float(value)
-
-        # Detect button state changes → press/release events
-        current_buttons = list(msg.buttons)
-        if self._last_joy_buttons is None:
-            self._last_joy_buttons = [0] * len(current_buttons)
-
-        button_events = []
-        for i, pressed in enumerate(current_buttons):
-            if i < len(self._last_joy_buttons) and pressed != self._last_joy_buttons[i]:
-                if i in JOY_BUTTON_MAP:
-                    button_events.append({
-                        "type": "button",
-                        "name": JOY_BUTTON_MAP[i],
-                        "pressed": bool(pressed),
-                        "timestamp": now,
-                    })
-        self._last_joy_buttons = current_buttons
-
-        self.last_ros_cmd = {"axes": axes, "button_event": button_events}
-        self.last_ros_cmd_time = now
+        Uses 'spawn' start method (not the Linux default 'fork') so the child
+        process starts with a clean slate and does NOT inherit the parent's
+        CycloneDDS domain state.
+        """
+        import multiprocessing as mp
+        ctx = mp.get_context('spawn')
+        self._ros_data_queue = ctx.Queue(maxsize=2)
+        self._ros_process = ctx.Process(
+            target=_joy_subscriber_process,
+            args=(self._ros_data_queue,),
+            daemon=True,
+            name="JoySubscriberProcess",
+        )
+        self._ros_process.start()
+        print("[JoystickCtrl] ROS2 subscriber started in subprocess (spawn) for /joy (sensor_msgs/Joy).")
 
     def _update_control_mode(self, events):
         """Toggle between local joystick and ROS control via Back+Start combo."""
@@ -179,6 +215,14 @@ class JoystickCtrl(Controller):
         self._update_control_mode(events)
 
         if self.control_mode == 'ros':
+            # Pull latest data from the subscriber subprocess
+            try:
+                ros_cmd = self._ros_data_queue.get_nowait()
+                self.last_ros_cmd = ros_cmd
+                self.last_ros_cmd_time = time.time()
+            except Exception:
+                pass  # No new data; use last known
+
             if self.last_ros_cmd and (time.time() - self.last_ros_cmd_time < 0.5):
                 ros_cmd = self.last_ros_cmd.copy()
                 # Merge physical button events so Back+Start combo can toggle back

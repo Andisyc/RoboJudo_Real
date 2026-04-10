@@ -131,7 +131,8 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
         ),
     ]
 
-    loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
+    # loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
+    loco_policy: G1AsapLocoPolicyCfg = G1AsapLocoPolicyCfg()
     mimic_policies: list[G1BeyondMimicPolicyCfg] = [
         G1BeyondMimicPolicyCfg(policy_name="g1_dance2", without_state_estimator=False, max_timestep=1000),
     ]

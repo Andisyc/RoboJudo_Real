@@ -42,6 +42,13 @@ def _joy_subscriber_process(data_queue):
     (e.g. Unitree SDK's internal CycloneDDS participant).
     Subscribes to /joy and puts parsed data into data_queue.
     """
+    import os
+    # Remove Unitree SDK's custom CycloneDDS config before rclpy init.
+    # The SDK sets CYCLONEDDS_URI to its own cyclonedds.xml which conflicts
+    # with rclpy creating a DDS participant. Clearing it lets rclpy use the
+    # default CycloneDDS configuration.
+    os.environ.pop('CYCLONEDDS_URI', None)
+
     import rclpy
     from rclpy.node import Node
     from sensor_msgs.msg import Joy

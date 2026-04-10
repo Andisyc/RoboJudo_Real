@@ -68,10 +68,8 @@ class JoystickCtrl(Controller):
         """Initializes the ROS2 subscriber in a background thread."""
         self._last_joy_buttons = None
         try:
-            rclpy.init()
-        except RuntimeError:
-            pass  # Already initialized by parent process
-        try:
+            if not rclpy.ok():
+                rclpy.init()
             self.ros_node = Node('joystick_ctrl_subscriber')
             self.ros_sub = self.ros_node.create_subscription(
                 Joy,

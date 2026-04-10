@@ -1,9 +1,42 @@
 import time
 from queue import Empty, Queue
+from threading import Thread
+
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import Joy
 
 from robojudo.controller import Controller, ctrl_registry
 from robojudo.controller.ctrl_cfgs import JoystickCtrlCfg
 from robojudo.controller.utils.joystick import JoystickThread
+
+# Axis index → name mapping (must match agent_publisher.py KEY_AXIS_MAP indices)
+JOY_AXIS_MAP = {
+    0: "LeftX",
+    1: "LeftY",
+    2: "LT",
+    3: "RightX",
+    4: "RightY",
+    5: "RT",
+}
+
+# Button index → name mapping (must match agent_publisher.py KEY_BUTTON_MAP indices)
+# Indices 0-7  : standard buttons
+# Indices 11-14: D-Pad directions (mirror joystick.py dpad_map event names)
+JOY_BUTTON_MAP = {
+    0:  "A",
+    1:  "B",
+    2:  "X",
+    3:  "Y",
+    4:  "LB",
+    5:  "RB",
+    6:  "Back",
+    7:  "Start",
+    11: "Left",
+    12: "Right",
+    13: "Up",
+    14: "Down",
+}
 
 
 @ctrl_registry.register
@@ -19,7 +52,88 @@ class JoystickCtrl(Controller):
         self.joystick_thread.start()
 
         self.axes_names = self.joystick_thread.config["axis_config"]["axis_map"].keys()
+
+        # ROS2 mode switching setup
+        self.control_mode = 'local'  # 'local' or 'ros'
+        self.last_ros_cmd_time = 0
+        self.last_ros_cmd = None
+        self.toggle_buttons = {'Back', 'Start'}  # Back+Start to toggle mode
+        self.active_toggle_buttons = set()
+        self.toggle_debounce = False
+
+        self.init_ros()
         self.reset()
+
+    def init_ros(self):
+        """Initializes the ROS2 subscriber in a background thread."""
+        self._last_joy_buttons = None
+        try:
+            rclpy.init()
+        except RuntimeError:
+            pass  # Already initialized by parent process
+        try:
+            self.ros_node = Node('joystick_ctrl_subscriber')
+            self.ros_sub = self.ros_node.create_subscription(
+                Joy,
+                '/joy',
+                self._ros_cmd_callback,
+                10)
+            self.ros_thread = Thread(target=rclpy.spin, args=(self.ros_node,), daemon=True)
+            self.ros_thread.start()
+            print("[JoystickCtrl] ROS2 subscriber initialized for /joy (sensor_msgs/Joy).")
+        except Exception as e:
+            print(f"[JoystickCtrl] ROS2 initialization skipped or failed: {e}")
+
+    def _ros_cmd_callback(self, msg: Joy):
+        """Convert incoming Joy message to internal axes+button-event format."""
+        now = time.time()
+
+        # Convert indexed axes to named dict
+        axes = {name: 0.0 for name in JOY_AXIS_MAP.values()}
+        for i, value in enumerate(msg.axes):
+            if i in JOY_AXIS_MAP:
+                axes[JOY_AXIS_MAP[i]] = float(value)
+
+        # Detect button state changes → press/release events
+        current_buttons = list(msg.buttons)
+        if self._last_joy_buttons is None:
+            self._last_joy_buttons = [0] * len(current_buttons)
+
+        button_events = []
+        for i, pressed in enumerate(current_buttons):
+            if i < len(self._last_joy_buttons) and pressed != self._last_joy_buttons[i]:
+                if i in JOY_BUTTON_MAP:
+                    button_events.append({
+                        "type": "button",
+                        "name": JOY_BUTTON_MAP[i],
+                        "pressed": bool(pressed),
+                        "timestamp": now,
+                    })
+        self._last_joy_buttons = current_buttons
+
+        self.last_ros_cmd = {"axes": axes, "button_event": button_events}
+        self.last_ros_cmd_time = now
+
+    def _update_control_mode(self, events):
+        """Toggle between local joystick and ROS control via Back+Start combo."""
+        for event in events:
+            if event['type'] == 'button' and event['name'] in self.toggle_buttons:
+                if event['pressed']:
+                    self.active_toggle_buttons.add(event['name'])
+                else:
+                    self.active_toggle_buttons.discard(event['name'])
+
+        if self.active_toggle_buttons == self.toggle_buttons:
+            if not self.toggle_debounce:
+                if self.control_mode == 'local':
+                    self.control_mode = 'ros'
+                    print("\n[JoystickCtrl] Switched to ROS control mode.")
+                else:
+                    self.control_mode = 'local'
+                    print("\n[JoystickCtrl] Switched to Local Joystick control mode.")
+                self.toggle_debounce = True
+        else:
+            self.toggle_debounce = False
 
     def reset(self):
         self.combination_init_buttons = self.cfg_ctrl.combination_init_buttons
@@ -62,13 +176,28 @@ class JoystickCtrl(Controller):
         return events
 
     def get_data(self):
-        state = self.get_state()
+        # Always drain physical joystick events (needed for mode toggle detection)
         events = self.get_events()
+        self._update_control_mode(events)
 
-        return {
-            "axes": state["axes"],
-            "button_event": events,
-        }
+        if self.control_mode == 'ros':
+            if self.last_ros_cmd and (time.time() - self.last_ros_cmd_time < 0.5):
+                ros_cmd = self.last_ros_cmd.copy()
+                # Merge physical button events so Back+Start combo can toggle back
+                ros_cmd.setdefault('button_event', []).extend(events)
+                return ros_cmd
+            else:
+                # ROS mode but no recent data → safe neutral state
+                return {
+                    "axes": {name: 0.0 for name in self.axes_names},
+                    "button_event": events,
+                }
+        else:  # 'local' joystick control
+            state = self.get_state()
+            return {
+                "axes": state["axes"],
+                "button_event": events,
+            }
 
     def process_triggers(self, ctrl_data):
         commands = []

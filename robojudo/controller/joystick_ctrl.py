@@ -43,11 +43,13 @@ def _joy_subscriber_process(data_queue):
     Subscribes to /joy and puts parsed data into data_queue.
     """
     import os
-    # Remove Unitree SDK's custom CycloneDDS config before rclpy init.
-    # The SDK sets CYCLONEDDS_URI to its own cyclonedds.xml which conflicts
-    # with rclpy creating a DDS participant. Clearing it lets rclpy use the
-    # default CycloneDDS configuration.
+    # Remove environment variables that conflict with rclpy's DDS initialization:
+    # - CYCLONEDDS_URI: set by Unitree SDK to its own cyclonedds.xml, conflicts with rclpy
+    # - ROS_LOCALHOST_ONLY: when set to 1, rclpy injects a CycloneDDS config that forces
+    #   the interface to 'localhost', which CycloneDDS rejects on some systems, and also
+    #   blocks cross-machine communication (other developers can't reach this node).
     os.environ.pop('CYCLONEDDS_URI', None)
+    os.environ.pop('ROS_LOCALHOST_ONLY', None)
 
     import rclpy
     from rclpy.node import Node

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional, Union # 引入兼容类型
 from abc import ABC, abstractmethod
 

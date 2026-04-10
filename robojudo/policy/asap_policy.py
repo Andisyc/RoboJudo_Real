@@ -339,48 +339,48 @@ class AsapLocoPolicy(Policy):
                 button_event = ctrl_data[key]["button_event"]
                 for event in button_event:
                     if event["type"] == "button" and event["pressed"]:
-                        match event["name"]:
-                            case "Left":
-                                self.stand_command = 1 - self.stand_command
-                                if self.stand_command == 0:
-                                    self.ang_vel_command[0] = 0.0
-                                    self.lin_vel_command[0] = 0.0
-                                    self.lin_vel_command[1] = 0.0
-                            case "Up":
-                                self.base_height_command[0] += 0.05
-                            case "Down":
-                                self.base_height_command[0] -= 0.05
+                        name = event["name"]
+                        if name == "Left":
+                            self.stand_command = 1 - self.stand_command
+                            if self.stand_command == 0:
+                                self.ang_vel_command[0] = 0.0
+                                self.lin_vel_command[0] = 0.0
+                                self.lin_vel_command[1] = 0.0
+                        elif name == "Up":
+                            self.base_height_command[0] += 0.05
+                        elif name == "Down":
+                            self.base_height_command[0] -= 0.05
                 break
             elif key == "KeyboardCtrl":
                 for event in ctrl_data[key]["keyboard_event"]:
                     if event["type"] == "keyboard" and event["pressed"]:
-                        match event["name"]:
-                            case "w":
-                                self.lin_vel_command[0] += 0.1 if self.stand_command else 0.0
-                            case "s":
-                                self.lin_vel_command[0] -= 0.1 if self.stand_command else 0.0
-                            case "a":
-                                self.lin_vel_command[1] += 0.1 if self.stand_command else 0.0
-                            case "d":
-                                self.lin_vel_command[1] -= 0.1 if self.stand_command else 0.0
-                            case "q":
-                                self.ang_vel_command[0] -= 0.1
-                            case "e":
-                                self.ang_vel_command[0] += 0.1
-                            case "z":
+                        name = event["name"]
+                        if name == "w":
+                            self.lin_vel_command[0] += 0.1 if self.stand_command else 0.0
+                        elif name == "s":
+                            self.lin_vel_command[0] -= 0.1 if self.stand_command else 0.0
+                        elif name == "a":
+                            self.lin_vel_command[1] += 0.1 if self.stand_command else 0.0
+                        elif name == "d":
+                            self.lin_vel_command[1] -= 0.1 if self.stand_command else 0.0
+                        elif name == "q":
+                            self.ang_vel_command[0] -= 0.1
+                        elif name == "e":
+                            self.ang_vel_command[0] += 0.1
+                        elif name == "z":
+                            self.ang_vel_command[0] = 0.0
+                            self.lin_vel_command[0] = 0.0
+                            self.lin_vel_command[1] = 0.0
+                        elif name == "1":
+                            self.base_height_command += 0.05
+                        elif name == "2":
+                            self.base_height_command -= 0.05
+                        elif name == "=":
+                            self.stand_command = 1 - self.stand_command
+                            if self.stand_command == 0:
                                 self.ang_vel_command[0] = 0.0
                                 self.lin_vel_command[0] = 0.0
                                 self.lin_vel_command[1] = 0.0
-                            case "1":
-                                self.base_height_command += 0.05
-                            case "2":
-                                self.base_height_command -= 0.05
-                            case "=":
-                                self.stand_command = 1 - self.stand_command
-                                if self.stand_command == 0:
-                                    self.ang_vel_command[0] = 0.0
-                                    self.lin_vel_command[0] = 0.0
-                                    self.lin_vel_command[1] = 0.0
 
     def debug_viz(self, visualizer: MujocoVisualizer, env_data, ctrl_data, extras):
         base_pos = env_data["base_pos"]

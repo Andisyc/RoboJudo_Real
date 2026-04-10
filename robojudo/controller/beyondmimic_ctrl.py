@@ -134,13 +134,12 @@ class BeyondMimicCtrl(Controller):
                 self.timestep += 1
 
         for command in commands or []:
-            match command:
-                case "[MOTION_RESET]":
-                    self.reset()
-                case "[MOTION_FADE_IN]":
-                    self.playing = True
-                case "[MOTION_FADE_OUT]":
-                    self.playing = False
+            if command == "[MOTION_RESET]":
+                self.reset()
+            elif command == "[MOTION_FADE_IN]":
+                self.playing = True
+            elif command == "[MOTION_FADE_OUT]":
+                self.playing = False
 
     def get_data(self):
         ctrl_data = {

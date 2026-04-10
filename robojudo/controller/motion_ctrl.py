@@ -206,18 +206,17 @@ class MotionCtrl(Controller):
             self.motion_gui.update_time(self.motion_time)
 
         for command in commands:
-            match command:
-                case "[MOTION_FADE_IN]":
-                    self.fade_in()
-                case "[MOTION_FADE_OUT]":
-                    self.fade_out()
-                case "[MOTION_RESET]":
-                    self.reset()
-                case "[MOTION_LOAD_NEXT]":
-                    self.load_motion(self.motion_id + 1, block=False)
-                case "[MOTION_LOAD_PREV]":
-                    if self.motion_id > 0:
-                        self.load_motion(self.motion_id - 1, block=False)
+            if command == "[MOTION_FADE_IN]":
+                self.fade_in()
+            elif command == "[MOTION_FADE_OUT]":
+                self.fade_out()
+            elif command == "[MOTION_RESET]":
+                self.reset()
+            elif command == "[MOTION_LOAD_NEXT]":
+                self.load_motion(self.motion_id + 1, block=False)
+            elif command == "[MOTION_LOAD_PREV]":
+                if self.motion_id > 0:
+                    self.load_motion(self.motion_id - 1, block=False)
 
     # ========== Play Control ==============
     def reset(self):

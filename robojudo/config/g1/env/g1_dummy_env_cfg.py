@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Literal
 
 from robojudo.environment.env_cfgs import RobotEnvCfg

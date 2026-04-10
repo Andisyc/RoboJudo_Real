@@ -117,21 +117,33 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
 
     # py3.10 -> py3.8
     # ctrl: list[UnitreeCtrlCfg | JoystickCtrlCfg] = [
-    ctrl: List[Union[UnitreeCtrlCfg, JoystickCtrlCfg]] = [
-        UnitreeCtrlCfg(),
-        # "A": "[SHUTDOWN]", # damping
-        # "X": "[MOTION_FADE_IN]",
-        # "B": "[MOTION_FADE_OUT]",
-        # "Y": "[MOTION_RESET]",
+    # ctrl: List[Union[UnitreeCtrlCfg, JoystickCtrlCfg]] = [
+    #     UnitreeCtrlCfg(),
+    #     # "A": "[SHUTDOWN]", # damping
+    #     # "X": "[MOTION_FADE_IN]",
+    #     # "B": "[MOTION_FADE_OUT]",
+    #     # "Y": "[MOTION_RESET]",
+    #     JoystickCtrlCfg(
+    #         triggers_extra={
+    #             "RB+Down": "[POLICY_LOCO]",
+    #             "RB+Up": "[POLICY_MIMIC]",
+    #         }
+    #     ),
+    # ]
+
+    ctrl: List[Union[JoystickCtrlCfg]] = [
         JoystickCtrlCfg(
             triggers_extra={
                 "RB+Down": "[POLICY_LOCO]",
                 "RB+Up": "[POLICY_MIMIC]",
+                "RB+Left": "[POLICY_SWITCH],LAST",
+                "RB+Right": "[POLICY_SWITCH],NEXT",
             }
         ),
     ]
 
-    loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
+    # loco_policy: G1UnitreeWoGaitPolicyCfg = G1UnitreeWoGaitPolicyCfg()
+    loco_policy: G1AsapLocoPolicyCfg = G1AsapLocoPolicyCfg()
     mimic_policies: list[G1BeyondMimicPolicyCfg] = [
         G1BeyondMimicPolicyCfg(policy_name="g1_dance2", without_state_estimator=False, max_timestep=1000),
     ]

@@ -88,7 +88,7 @@ class AsapPolicy(Policy):
         return phase
 
     def _get_obs_history(self):
-        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
+        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf)]
         return np.concatenate(history_list, axis=0)
 
     def get_observation(self, env_data, ctrl_data):
@@ -233,7 +233,7 @@ class AsapLocoPolicy(Policy):
         return np.array([phase_time])
 
     def _get_obs_history(self):
-        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
+        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf)]
         return np.concatenate(history_list, axis=0)
 
     def get_observation(self, env_data, ctrl_data):

@@ -56,7 +56,7 @@ class KungfuBotGeneralPolicy(Policy):
         pass
 
     def _get_obs_history(self):
-        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf, strict=True)]
+        history_list = [np.concatenate(items, axis=0) for items in zip(*self.history_buf)]
         return np.concatenate(history_list, axis=0)
 
     def _get_commands(self, ctrl_data):

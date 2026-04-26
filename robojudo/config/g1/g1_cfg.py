@@ -111,7 +111,7 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
         # env_type="UnitreeEnv",  # For unitree_sdk2py
         env_type="UnitreeCppEnv",  # For unitree_cpp, check README for more details
         unitree=G1UnitreeCfg(
-            net_if="eth0",  # note: change to your network interface enp211s0f1np1 | eth0, 
+            net_if="enP8p1s0",  # note: change to your network interface enp211s0f1np1 | eth0, 
         ),
     )
 
@@ -146,6 +146,7 @@ class g1_real_loco_mimic(RlLocoMimicPipelineCfg): # Sim2Real
     loco_policy: G1AsapLocoPolicyCfg = G1AsapLocoPolicyCfg()
     mimic_policies: list[G1BeyondMimicPolicyCfg] = [
         G1BeyondMimicPolicyCfg(policy_name="g1_dance2", without_state_estimator=False, max_timestep=1000),
+        # G1BeyondMimicPolicyCfg(policy_name="", without_state_estimator=False, max_timestep=1000),
     ]
 
     do_safety_check: bool = True  # enable safety check for real robot

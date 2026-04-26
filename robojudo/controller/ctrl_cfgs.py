@@ -33,6 +33,15 @@ class JoystickCtrlCfg(CtrlCfg):
     combination_init_buttons: list[str] = ["LB", "RB"]
     """first button in combination, need to be held down to trigger other commands;"""
 
+    use_pyusb: bool = True
+    """Use PyUSBJoystickThread (pyusb) instead of pygame/SDL.
+    Required when the kernel xpad module is unavailable (e.g. after G1 reflash)."""
+
+    pyusb_vid: int | None = None
+    """Custom USB Vendor ID (e.g. 0x20bc for Betop). None = auto-detect from built-in list."""
+    pyusb_pid: int | None = None
+    """Custom USB Product ID (e.g. 0x5500). None = auto-detect from built-in list."""
+
     # reference for button names in JoystickThread config
     triggers: dict[str, str] = {
         "A": "[SHUTDOWN]",

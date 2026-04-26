@@ -5,7 +5,7 @@ from queue import Empty, Queue
 
 from robojudo.controller import Controller, ctrl_registry
 from robojudo.controller.ctrl_cfgs import JoystickCtrlCfg
-from robojudo.controller.utils.joystick import JoystickThread
+from robojudo.controller.utils.joystick import JoystickThread, PyUSBJoystickThread
 
 # Axis index → name mapping (must match agent_publisher.py KEY_AXIS_MAP indices)
 JOY_AXIS_MAP = {
@@ -119,7 +119,25 @@ class JoystickCtrl(Controller):
 
         self.state_queue = Queue(maxsize=2)  # for axes
         self.event_queue = Queue(maxsize=100)  # for button/dpad events
-        self.joystick_thread = JoystickThread(self.state_queue, self.event_queue)
+
+        # Select joystick backend based on config.
+        # use_pyusb=True: read directly via pyusb (no kernel xpad module needed).
+        # use_pyusb=False: use pygame/SDL (requires kernel xpad or similar driver).
+        if cfg_ctrl.use_pyusb:
+            try:
+                self.joystick_thread = PyUSBJoystickThread(
+                    self.state_queue, self.event_queue,
+                    custom_vid=cfg_ctrl.pyusb_vid,
+                    custom_pid=cfg_ctrl.pyusb_pid,
+                )
+                print("[JoystickCtrl] Using PyUSB backend (xpad kernel module not required).")
+            except Exception as e:
+                print(f"[JoystickCtrl] PyUSB backend unavailable ({e}), falling back to pygame.")
+                self.joystick_thread = JoystickThread(self.state_queue, self.event_queue)
+        else:
+            # Legacy pygame/SDL path (requires kernel xpad or SDL joystick driver)
+            self.joystick_thread = JoystickThread(self.state_queue, self.event_queue)
+
         self.joystick_thread.start()
 
         self.axes_names = self.joystick_thread.config["axis_config"]["axis_map"].keys()

@@ -44,6 +44,7 @@ from .policy.g1_twist_policy_cfg import G1TwistPolicyCfg  # noqa: F401
 from .policy.g1_unitree_policy_cfg import (
     G1UnitreePolicyCfg, 
     G1UnitreeWoGaitPolicyCfg,)  # noqa: F401
+from .policy.g1_unilab_policy_cfg import G1UniLabPolicyCfg  # noqa: F401
 
 
 # ======================== Basic Configs ======================== #
@@ -95,6 +96,44 @@ class g1_real(g1): # Sim2Real
     ]
 
     do_safety_check: bool = True  # enable safety check for real robot
+
+
+@cfg_registry.register
+class g1_unilab(RlPipelineCfg): # Sim2Sim
+    """
+    Unitree G1 robot configuration, UniLab G1WalkFlat Policy.
+    """
+
+    robot: str = "g1"
+    env: G1MujocoEnvCfg = G1MujocoEnvCfg()
+
+    ctrl: List[Union[JoystickCtrlCfg, KeyboardCtrlCfg]] = [
+        JoystickCtrlCfg(),
+        # KeyboardCtrlCfg(),
+    ]
+
+    policy: G1UniLabPolicyCfg = G1UniLabPolicyCfg()
+
+
+@cfg_registry.register
+class g1_real_unilab(g1_unilab): # Sim2Real
+    """
+    Unitree G1 robot configuration, UniLab G1WalkFlat Policy.
+    """
+
+    env: G1RealEnvCfg = G1RealEnvCfg(
+        env_type="UnitreeCppEnv",
+        unitree=G1UnitreeCfg(
+            net_if="eth0",
+        ),
+    )
+
+    ctrl: List[Union[UnitreeCtrlCfg, JoystickCtrlCfg]] = [
+        UnitreeCtrlCfg(),
+        JoystickCtrlCfg(),
+    ]
+
+    do_safety_check: bool = True
 
 
 @cfg_registry.register

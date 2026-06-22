@@ -14,7 +14,7 @@ echo "📝 正在执行: git commit -m \"$COMMIT_MSG\""
 git commit -m "$COMMIT_MSG"
 
 # 3. 推送到 main 分支
-echo "☁️ 正在执行: git push origin main"
+echo "☁️ 正在执行: git push origin release"
 git push origin main
 
 echo "✅ 同步完成！"

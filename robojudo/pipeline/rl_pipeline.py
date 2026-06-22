@@ -266,6 +266,9 @@ class RlPipeline(Pipeline):
         # get control command
         ctrl_data = self.ctrl_manager.get_ctrl_data(env_data)
         commands = ctrl_data.get("COMMANDS", [])
+        if dry_run:
+            commands = list(commands) + ["[UNILAB_FREEZE_PHASE]"]
+            ctrl_data["COMMANDS"] = commands
         if len(commands) > 0:
             logger.info(f"{'=' * 10} COMMANDS {'=' * 10}\n{commands}")
 

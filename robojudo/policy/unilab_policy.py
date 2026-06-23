@@ -44,6 +44,7 @@ class UniLabPolicy(Policy):
         self.freeze_phase_during_dry_run = bool(
             getattr(cfg_policy, "freeze_phase_during_dry_run", True)
         )
+        self.use_torso_obs_source = bool(getattr(cfg_policy, "use_torso_obs_source", True))
 
         self.command_maps = [list(v) for v in cfg_policy.command_maps]
         self.debug_checks = bool(getattr(cfg_policy, "debug_checks", True))
@@ -166,14 +167,22 @@ class UniLabPolicy(Policy):
 
     def get_observation(self, env_data, ctrl_data):
         commands = self._get_commands(ctrl_data)
-        gravity = -get_gravity_orientation(env_data.base_quat).astype(np.float32)
+        torso_ang_vel = getattr(env_data, "torso_ang_vel", None)
+        torso_quat = getattr(env_data, "torso_quat", None)
+        if self.use_torso_obs_source and torso_ang_vel is not None and torso_quat is not None:
+            ang_vel = np.asarray(torso_ang_vel, dtype=np.float32)
+            gravity = -get_gravity_orientation(np.asarray(torso_quat, dtype=np.float32)).astype(np.float32)
+            obs_source = "torso"
+        else:
+            ang_vel = np.asarray(env_data.base_ang_vel, dtype=np.float32)
+            gravity = -get_gravity_orientation(env_data.base_quat).astype(np.float32)
+            obs_source = "base"
         dof_pos_rel = np.asarray(env_data.dof_pos - self.default_dof_pos, dtype=np.float32)
         dof_vel = np.asarray(env_data.dof_vel, dtype=np.float32)
-        base_ang_vel = np.asarray(env_data.base_ang_vel, dtype=np.float32)
 
         obs = np.concatenate(
             [
-                base_ang_vel * 0.25,
+                ang_vel * 0.25,
                 gravity,
                 dof_pos_rel,
                 dof_vel * 0.05,
@@ -192,6 +201,7 @@ class UniLabPolicy(Policy):
             "commands": commands,
             "gait_phase": self.gait_phase.copy(),
             "unilab_obs_dim": obs.shape[0],
+            "obs_source": obs_source,
         }
         return obs, extras
 

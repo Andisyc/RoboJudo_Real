@@ -171,11 +171,11 @@ class UniLabPolicy(Policy):
         torso_quat = getattr(env_data, "torso_quat", None)
         if self.use_torso_obs_source and torso_ang_vel is not None and torso_quat is not None:
             ang_vel = np.asarray(torso_ang_vel, dtype=np.float32)
-            gravity = -get_gravity_orientation(np.asarray(torso_quat, dtype=np.float32)).astype(np.float32)
+            gravity = get_gravity_orientation(np.asarray(torso_quat, dtype=np.float32)).astype(np.float32)
             obs_source = "torso"
         else:
             ang_vel = np.asarray(env_data.base_ang_vel, dtype=np.float32)
-            gravity = -get_gravity_orientation(env_data.base_quat).astype(np.float32)
+            gravity = get_gravity_orientation(env_data.base_quat).astype(np.float32)
             obs_source = "base"
         dof_pos_rel = np.asarray(env_data.dof_pos - self.default_dof_pos, dtype=np.float32)
         dof_vel = np.asarray(env_data.dof_vel, dtype=np.float32)

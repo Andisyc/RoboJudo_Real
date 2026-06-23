@@ -116,6 +116,8 @@ class g1_unilab(RlPipelineCfg): # Sim2Sim
     env: G1MujocoEnvCfg = G1MujocoEnvCfg(
         dof=G1UniLabMujocoDoF(),
         init_qpos=UNILAB_G1_STAND_QPOS,
+        sim_dt=0.02 / 3.0,
+        sim_decimation=3,
     )
 
     ctrl: List[Union[JoystickCtrlCfg, KeyboardCtrlCfg]] = [

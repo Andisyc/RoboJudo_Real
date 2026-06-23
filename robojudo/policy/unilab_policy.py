@@ -32,7 +32,15 @@ class UniLabPolicy(Policy):
             )
 
         self.gait_frequency = float(cfg_policy.gait_frequency)
-        self.gait_phase = np.zeros(2, dtype=np.float32)
+        self.initial_gait_phase = np.asarray(
+            getattr(cfg_policy, "initial_gait_phase", [0.0, np.pi]), dtype=np.float32
+        )
+        if self.initial_gait_phase.shape != (2,):
+            raise ValueError(
+                f"UniLabPolicy initial_gait_phase must have shape (2,), "
+                f"got {self.initial_gait_phase.shape}."
+            )
+        self.gait_phase = self.initial_gait_phase.copy()
         self.freeze_phase_during_dry_run = bool(
             getattr(cfg_policy, "freeze_phase_during_dry_run", True)
         )
@@ -99,8 +107,21 @@ class UniLabPolicy(Policy):
 
     def reset(self):
         self.last_action = np.zeros(self.num_actions, dtype=np.float32)
-        self.gait_phase = np.zeros(2, dtype=np.float32)
+        self.gait_phase = self.initial_gait_phase.copy()
         self._last_obs = None
+
+    def snapshot_state(self) -> dict[str, np.ndarray | None]:
+        return {
+            "last_action": np.asarray(self.last_action, dtype=np.float32).copy(),
+            "gait_phase": self.gait_phase.copy(),
+            "last_obs": None if self._last_obs is None else self._last_obs.copy(),
+        }
+
+    def restore_state(self, state: dict[str, np.ndarray | None]):
+        self.last_action = np.asarray(state["last_action"], dtype=np.float32).copy()
+        self.gait_phase = np.asarray(state["gait_phase"], dtype=np.float32).copy()
+        last_obs = state.get("last_obs")
+        self._last_obs = None if last_obs is None else np.asarray(last_obs, dtype=np.float32).copy()
 
     def post_step_callback(self, commands: list[str] | None = None):
         if self.freeze_phase_during_dry_run and commands and "[UNILAB_FREEZE_PHASE]" in commands:

@@ -23,6 +23,7 @@ from .ctrl.g1_twist_redis_ctrl_cfg import G1TwistRedisCtrlCfg  # noqa: F401
 
 # ======================== Env Configs ======================== #
 from .env.g1_dummy_env_cfg import G1DummyEnvCfg  # noqa: F401
+from .env.g1_env_cfg import G1UniLabMujocoDoF  # noqa: F401
 from .env.g1_mujuco_env_cfg import (
     G1_12MujocoEnvCfg, 
     G1_23MujocoEnvCfg, 
@@ -44,7 +45,14 @@ from .policy.g1_twist_policy_cfg import G1TwistPolicyCfg  # noqa: F401
 from .policy.g1_unitree_policy_cfg import (
     G1UnitreePolicyCfg, 
     G1UnitreeWoGaitPolicyCfg,)  # noqa: F401
-from .policy.g1_unilab_policy_cfg import G1UniLabPolicyCfg  # noqa: F401
+from .policy.g1_unilab_policy_cfg import G1UniLabDoF, G1UniLabPolicyCfg  # noqa: F401
+
+
+UNILAB_G1_STAND_ROOT_QPOS: list[float] = [0.0, 0.0, 0.754, 1.0, 0.0, 0.0, 0.0]
+UNILAB_G1_STAND_QPOS: list[float] = [
+    *UNILAB_G1_STAND_ROOT_QPOS,
+    *G1UniLabDoF().default_pos,
+]
 
 
 # ======================== Basic Configs ======================== #
@@ -105,7 +113,10 @@ class g1_unilab(RlPipelineCfg): # Sim2Sim
     """
 
     robot: str = "g1"
-    env: G1MujocoEnvCfg = G1MujocoEnvCfg()
+    env: G1MujocoEnvCfg = G1MujocoEnvCfg(
+        dof=G1UniLabMujocoDoF(),
+        init_qpos=UNILAB_G1_STAND_QPOS,
+    )
 
     ctrl: List[Union[JoystickCtrlCfg, KeyboardCtrlCfg]] = [
         JoystickCtrlCfg(),

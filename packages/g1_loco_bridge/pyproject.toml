@@ -1,0 +1,16 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "pybind11>=2.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "g1_loco_bridge"
+version = "0.1.0"
+description = "RoboJuDo-owned Unitree G1 locomotion handoff bridge"
+requires-python = ">=3.8"
+license = { text = "CC-BY-4.0" }
+
+[tool.scikit-build]
+cmake.minimum-version = "3.15"
+cmake.build-type = "Release"
+wheel.packages = ["src/g1_loco_bridge"]
+

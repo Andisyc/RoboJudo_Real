@@ -54,33 +54,51 @@ def main():
     print(f"cfg.device: {cfg.device}")
     print("\n")
 
-    # if mujoco = False
-    if not cfg.env.is_sim:
-        pipeline.prepare()
-    
-    # temp = 1
-    # assert temp == 2
+    try:
+        # if mujoco = False
+        if not cfg.env.is_sim:
+            pipeline.prepare()
 
-    # continue execute step
-    while True:
-        time_start = time.time()
-        pipeline.step()
-        time_end = time.time()
-        time_diff = time_end - time_start
+        # continue execute step
+        while not getattr(pipeline, "should_stop", False):
+            time_start = time.time()
+            pipeline.step()
+            time_end = time.time()
+            time_diff = time_end - time_start
 
-        # keep the pipeline running at the desired frequency
-        if not cfg.run_fullspeed:
-            time_diff = pipeline.dt - time_diff
-            if time_diff > 0:
-                time.sleep(time_diff)
-            else:
-                if not cfg.env.is_sim:
+            # keep the pipeline running at the desired frequency
+            if not cfg.run_fullspeed:
+                time_diff = pipeline.dt - time_diff
+                if time_diff > 0:
+                    time.sleep(time_diff)
+                elif not cfg.env.is_sim:
                     logger.error(f"Warning: frame drop -> {time_diff}")
                     if time_diff < -0.2:
                         logger.critical("Exiting due to excessive frame drop")
                         pipeline.env.shutdown()
                         time.sleep(10)
                         break
+    except KeyboardInterrupt:
+        logger.warning("Interrupted by user")
+    finally:
+        close = getattr(pipeline, "close", None)
+        if callable(close):
+            close_result = 1
+            while close_result not in (None, 0):
+                try:
+                    close_result = close()
+                    if close_result not in (None, 0):
+                        logger.critical(
+                            "Control release is not confirmed; keeping the process "
+                            "alive and retrying close: %s",
+                            close_result,
+                        )
+                        time.sleep(0.5)
+                except KeyboardInterrupt:
+                    logger.critical(
+                        "Control release is still pending; ignoring interrupt while "
+                        "the controller remains active"
+                    )
 
 
 if __name__ == "__main__":

@@ -175,7 +175,6 @@ class G1LocoController {
   void LowCommandWriter();
   bool WriteLowCommandOnce();
   void PublishLowCommandLocked(const MotorCommand& command);
-  bool PublishPrearmHoldOnce();
 
   bool PrimeHoldCommandLocked();
   void DisablePublishingLocked();

@@ -232,8 +232,10 @@ void G1LocoController::LowCommandWriter() {
 
 bool G1LocoController::WriteLowCommandOnce() {
   std::lock_guard<std::mutex> publish_lock(publish_mutex_);
+  const AuthorityState authority_state = authority_state_.load();
   if (!publish_enabled_.load() ||
-      authority_state_.load() != AuthorityState::USER_ACTIVE ||
+      (authority_state != AuthorityState::ACQUIRING &&
+       authority_state != AuthorityState::USER_ACTIVE) ||
       closed_.load()) {
     return false;
   }
@@ -244,33 +246,30 @@ bool G1LocoController::WriteLowCommandOnce() {
   }
 
   PublishLowCommandLocked(*command);
-  active_publish_count_.fetch_add(1);
+  if (authority_state == AuthorityState::USER_ACTIVE) {
+    active_publish_count_.fetch_add(1);
+  }
   return true;
 }
 
 void G1LocoController::PublishLowCommandLocked(
     const MotorCommand& command) {
   LowCmd dds_command;
+  dds_command.mode_pr() = 0;
+  dds_command.mode_machine() = mode_machine_.load();
   for (std::size_t i = 0; i < num_dofs_; ++i) {
     auto& motor = dds_command.motor_cmd().at(i);
+    motor.mode() = 1;
     motor.q() = command.q_target.at(i);
     motor.dq() = command.dq_target.at(i);
     motor.kp() = command.kp.at(i);
     motor.kd() = command.kd.at(i);
     motor.tau() = command.tau_ff.at(i);
   }
+  dds_command.crc() = Crc32Core(
+      reinterpret_cast<uint32_t*>(&dds_command),
+      (sizeof(dds_command) >> 2U) - 1U);
   lowcmd_publisher_->Write(dds_command);
-}
-
-bool G1LocoController::PublishPrearmHoldOnce() {
-  const auto command = motor_command_buffer_.GetData();
-  if (!command) {
-    return false;
-  }
-
-  std::lock_guard<std::mutex> publish_lock(publish_mutex_);
-  PublishLowCommandLocked(*command);
-  return true;
 }
 
 bool G1LocoController::PrimeHoldCommandLocked() {
@@ -385,19 +384,24 @@ int32_t G1LocoController::acquire_user_control() {
   }
   active_publish_count_.store(0);
 
-  // Pre-arm rt/user_lowcmd with the measured joint position and active policy
-  // gains so the 801 -> 1000 handoff does not pass through PASSIVE.
-  if (!PublishPrearmHoldOnce()) {
+  // Keep one measured-position command streaming through the 801 -> 1000
+  // handoff. Policy targets remain blocked until USER_ACTIVE is confirmed.
+  authority_state_.store(AuthorityState::ACQUIRING);
+  EnablePublishingLocked();
+  if (!WriteLowCommandOnce()) {
+    DisablePublishingLocked();
+    authority_state_.store(AuthorityState::INTERNAL);
+    ClearCommandLocked();
     return kBridgeNoRobotState;
   }
 
-  authority_state_.store(AuthorityState::ACQUIRING);
   const int32_t switch_result = loco_client_->SwitchToUserCtrl();
   last_loco_api_result_.store(switch_result);
   if (switch_result != 0) {
     int32_t observed_fsm = -1;
     if (QueryFsmIdLocked(observed_fsm) == 0 &&
         observed_fsm != kUserControlFsmId) {
+      DisablePublishingLocked();
       authority_state_.store(AuthorityState::INTERNAL);
       ClearCommandLocked();
     } else if (observed_fsm == kUserControlFsmId) {
@@ -416,7 +420,6 @@ int32_t G1LocoController::acquire_user_control() {
   const int32_t confirm_result = WaitForFsmLocked(kUserControlFsmId);
   if (confirm_result == 0) {
     authority_state_.store(AuthorityState::USER_ACTIVE);
-    EnablePublishingLocked();
     if (!WriteLowCommandOnce()) {
       authority_state_.store(AuthorityState::FAULT);
       return kBridgeInvalidState;
@@ -425,12 +428,12 @@ int32_t G1LocoController::acquire_user_control() {
   }
 
   const auto hold_command = motor_command_buffer_.GetData();
-  DisablePublishingLocked();
   const int32_t fallback_result = loco_client_->SwitchToInternalCtrl(
       unitree::robot::g1::InternalFsmMode::PASSIVE);
   last_loco_api_result_.store(fallback_result);
   if (fallback_result == 0 &&
       WaitForFsmLocked(kPassiveFsmId) == 0) {
+    DisablePublishingLocked();
     owns_user_control_.store(false);
     authority_state_.store(AuthorityState::INTERNAL);
     ClearCommandLocked();
@@ -438,14 +441,13 @@ int32_t G1LocoController::acquire_user_control() {
     int32_t observed_fsm = -1;
     if (QueryFsmIdLocked(observed_fsm) == 0 &&
         observed_fsm != kUserControlFsmId) {
+      DisablePublishingLocked();
       owns_user_control_.store(false);
       authority_state_.store(AuthorityState::INTERNAL);
       ClearCommandLocked();
-    } else if (observed_fsm == kUserControlFsmId) {
+    } else {
       RestoreUserControlAfterReleaseFailureLocked(hold_command);
       WriteLowCommandOnce();
-    } else {
-      authority_state_.store(AuthorityState::FAULT);
     }
   }
   return confirm_result;

@@ -115,7 +115,6 @@ class G1NativeLocoMimicPipeline(Pipeline):
 
         self.policy.reset()
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
-        self._entry_start = self.env.dof_pos
         self._entry_target = self.policy.get_init_dof_pos()
         result = self.env.acquire_user_control()
         if result != 0:
@@ -139,6 +138,8 @@ class G1NativeLocoMimicPipeline(Pipeline):
             self.should_stop = True
             raise RuntimeError(f"G1 user control was not armed: {status}")
 
+        self.env.update()
+        self._entry_start = self.env.dof_pos.copy()
         self._entry_step = 0
         self.state = NativeLocoMimicState.ENTERING_MIMIC
         logger.warning("G1 user control acquired; entering mimic: %s", status)

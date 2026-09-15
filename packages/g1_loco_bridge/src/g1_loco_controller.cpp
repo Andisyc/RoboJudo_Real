@@ -11,8 +11,6 @@
 namespace robojudo::g1_loco {
 namespace {
 
-constexpr float kPrearmDamping = 1.5F;
-
 uint32_t Crc32Core(uint32_t* ptr, uint32_t len) {
   uint32_t crc = 0xFFFFFFFF;
   constexpr uint32_t polynomial = 0x04c11db7;
@@ -264,12 +262,15 @@ void G1LocoController::PublishLowCommandLocked(
   lowcmd_publisher_->Write(dds_command);
 }
 
-void G1LocoController::PublishPrearmDampingOnce() {
-  MotorCommand command(num_dofs_);
-  std::fill(command.kd.begin(), command.kd.end(), kPrearmDamping);
+bool G1LocoController::PublishPrearmHoldOnce() {
+  const auto command = motor_command_buffer_.GetData();
+  if (!command) {
+    return false;
+  }
 
   std::lock_guard<std::mutex> publish_lock(publish_mutex_);
-  PublishLowCommandLocked(command);
+  PublishLowCommandLocked(*command);
+  return true;
 }
 
 bool G1LocoController::PrimeHoldCommandLocked() {
@@ -371,18 +372,24 @@ int32_t G1LocoController::acquire_user_control() {
     return kBridgeInvalidState;
   }
 
-  const int32_t passive_result = EnsurePassiveInternalLocked();
-  if (passive_result != 0) {
-    return passive_result;
+  int32_t fsm_id = -1;
+  if (QueryFsmIdLocked(fsm_id) != 0) {
+    authority_state_.store(AuthorityState::FAULT);
+    return kBridgeFsmQueryFailed;
+  }
+  if (fsm_id != kWalkRunFsmId) {
+    return kBridgeUnexpectedFsm;
   }
   if (!PrimeHoldCommandLocked()) {
     return kBridgeNoRobotState;
   }
   active_publish_count_.store(0);
 
-  // Arm the Unitree user-control topic with a safe damping frame before
-  // requesting FSM 1000. Normal PD publishing is still disabled here.
-  PublishPrearmDampingOnce();
+  // Pre-arm rt/user_lowcmd with the measured joint position and active policy
+  // gains so the 801 -> 1000 handoff does not pass through PASSIVE.
+  if (!PublishPrearmHoldOnce()) {
+    return kBridgeNoRobotState;
+  }
 
   authority_state_.store(AuthorityState::ACQUIRING);
   const int32_t switch_result = loco_client_->SwitchToUserCtrl();

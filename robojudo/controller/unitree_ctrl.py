@@ -31,6 +31,15 @@ class UnitreeCtrl(JoystickCtrl):
         else:
             logger.warning("No Unitree env, controller not working.")
 
+    def get_data(self):
+        """Read the G1 remote without the generic joystick/ROS mode switch."""
+        events = self.get_events()
+        state = self.get_state()
+        return {
+            "axes": state["axes"],
+            "button_event": events,
+        }
+
 
 if __name__ == "__main__":
     from robojudo.config.g1.env.g1_real_env_cfg import G1RealEnvCfg

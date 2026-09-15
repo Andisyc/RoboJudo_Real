@@ -13,7 +13,7 @@ class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
     """Unitree native WALKRUN with explicit handoff to RoboJuDo dances."""
 
     env: G1LocoEnvCfg = G1LocoEnvCfg(
-        unitree=G1LocoUnitreeCfg(net_if="eth0"),
+        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0"),
     )
     ctrl: list[UnitreeCtrlCfg] = [
         UnitreeCtrlCfg(

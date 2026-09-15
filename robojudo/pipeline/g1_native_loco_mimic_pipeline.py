@@ -120,16 +120,28 @@ class G1NativeLocoMimicPipeline(Pipeline):
         result = self.env.acquire_user_control()
         if result != 0:
             logger.error("Failed to acquire G1 user control: %s", result)
-            if self.env.has_internal_control:
-                return
             self.state = NativeLocoMimicState.FAULT
+            self.should_stop = True
             raise RuntimeError(
-                f"G1 control authority became uncertain during acquire: {result}"
+                f"G1 user control acquire failed: {result} "
+                f"status={self.env.get_control_status()}"
             )
+
+        status = self.env.get_control_status()
+        if (
+            status["authority_state"] != "USER_ACTIVE"
+            or status["fsm_id"] != 1000
+            or not status["publish_enabled"]
+            or status["active_publish_count"] <= 0
+        ):
+            self.env.release_to_passive()
+            self.state = NativeLocoMimicState.FAULT
+            self.should_stop = True
+            raise RuntimeError(f"G1 user control was not armed: {status}")
 
         self._entry_step = 0
         self.state = NativeLocoMimicState.ENTERING_MIMIC
-        logger.warning("G1 user control acquired; entering mimic")
+        logger.warning("G1 user control acquired; entering mimic: %s", status)
 
     def _return_to_native_loco(self):
         if self.state == NativeLocoMimicState.NATIVE_LOCO:
@@ -142,11 +154,14 @@ class G1NativeLocoMimicPipeline(Pipeline):
             return
 
         result = self.env.release_to_walkrun()
-        if result == 0 or self.env.has_internal_control:
+        if result == 0:
             self.state = NativeLocoMimicState.NATIVE_LOCO
             self.policy.reset()
             self.env.reset()
-            logger.warning("Control returned to Unitree WALKRUN")
+            logger.warning(
+                "Control returned to Unitree WALKRUN: %s",
+                self.env.get_control_status(),
+            )
             return
 
         if self.env.has_user_control:
@@ -155,7 +170,11 @@ class G1NativeLocoMimicPipeline(Pipeline):
             return
 
         self.state = NativeLocoMimicState.FAULT
-        raise RuntimeError(f"G1 control authority became uncertain: {result}")
+        self.should_stop = True
+        raise RuntimeError(
+            f"G1 did not reach WALKRUN after release: {result} "
+            f"status={self.env.get_control_status()}"
+        )
 
     def _shutdown(self):
         result = self.close()

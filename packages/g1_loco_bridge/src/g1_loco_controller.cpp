@@ -11,6 +11,8 @@
 namespace robojudo::g1_loco {
 namespace {
 
+constexpr float kPrearmDamping = 1.5F;
+
 uint32_t Crc32Core(uint32_t* ptr, uint32_t len) {
   uint32_t crc = 0xFFFFFFFF;
   constexpr uint32_t polynomial = 0x04c11db7;
@@ -167,6 +169,10 @@ bool G1LocoController::is_publish_enabled() const {
   return publish_enabled_.load();
 }
 
+uint64_t G1LocoController::get_active_publish_count() const {
+  return active_publish_count_.load();
+}
+
 void G1LocoController::LowStateHandler(const void* message) {
   auto& low_state = *const_cast<LowState*>(
       static_cast<const LowState*>(message));
@@ -222,37 +228,48 @@ void G1LocoController::TorsoImuStateHandler(const void* message) {
   torso_imu_state_buffer_.SetData(state);
 }
 
-void G1LocoController::LowCommandWriter() { WriteLowCommandOnce(); }
+void G1LocoController::LowCommandWriter() {
+  static_cast<void>(WriteLowCommandOnce());
+}
 
-void G1LocoController::WriteLowCommandOnce() {
+bool G1LocoController::WriteLowCommandOnce() {
   std::lock_guard<std::mutex> publish_lock(publish_mutex_);
   if (!publish_enabled_.load() ||
       authority_state_.load() != AuthorityState::USER_ACTIVE ||
       closed_.load()) {
-    return;
+    return false;
   }
 
   const auto command = motor_command_buffer_.GetData();
   if (!command) {
-    return;
+    return false;
   }
 
+  PublishLowCommandLocked(*command);
+  active_publish_count_.fetch_add(1);
+  return true;
+}
+
+void G1LocoController::PublishLowCommandLocked(
+    const MotorCommand& command) {
   LowCmd dds_command;
-  dds_command.mode_pr() = 0;
-  dds_command.mode_machine() = mode_machine_.load();
   for (std::size_t i = 0; i < num_dofs_; ++i) {
     auto& motor = dds_command.motor_cmd().at(i);
-    motor.mode() = 1;
-    motor.q() = command->q_target.at(i);
-    motor.dq() = command->dq_target.at(i);
-    motor.kp() = command->kp.at(i);
-    motor.kd() = command->kd.at(i);
-    motor.tau() = command->tau_ff.at(i);
+    motor.q() = command.q_target.at(i);
+    motor.dq() = command.dq_target.at(i);
+    motor.kp() = command.kp.at(i);
+    motor.kd() = command.kd.at(i);
+    motor.tau() = command.tau_ff.at(i);
   }
-  dds_command.crc() = Crc32Core(
-      reinterpret_cast<uint32_t*>(&dds_command),
-      (sizeof(dds_command) >> 2U) - 1U);
   lowcmd_publisher_->Write(dds_command);
+}
+
+void G1LocoController::PublishPrearmDampingOnce() {
+  MotorCommand command(num_dofs_);
+  std::fill(command.kd.begin(), command.kd.end(), kPrearmDamping);
+
+  std::lock_guard<std::mutex> publish_lock(publish_mutex_);
+  PublishLowCommandLocked(command);
 }
 
 bool G1LocoController::PrimeHoldCommandLocked() {
@@ -296,7 +313,7 @@ int32_t G1LocoController::QueryFsmIdLocked(int32_t& fsm_id) {
   return result;
 }
 
-int32_t G1LocoController::WaitForUserFsmLocked() {
+int32_t G1LocoController::WaitForFsmLocked(int32_t expected_fsm_id) {
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::duration<double>(
                             config_.fsm_confirm_timeout);
@@ -305,7 +322,7 @@ int32_t G1LocoController::WaitForUserFsmLocked() {
     if (QueryFsmIdLocked(fsm_id) != 0) {
       return kBridgeFsmQueryFailed;
     }
-    if (fsm_id == kUserControlFsmId) {
+    if (fsm_id == expected_fsm_id) {
       return 0;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -313,21 +330,31 @@ int32_t G1LocoController::WaitForUserFsmLocked() {
   return kBridgeFsmTimeout;
 }
 
-int32_t G1LocoController::WaitForInternalFsmLocked() {
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::duration<double>(
-                            config_.fsm_confirm_timeout);
-  do {
-    int32_t fsm_id = -1;
-    if (QueryFsmIdLocked(fsm_id) != 0) {
-      return kBridgeFsmQueryFailed;
-    }
-    if (fsm_id != kUserControlFsmId) {
-      return 0;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  } while (std::chrono::steady_clock::now() < deadline);
-  return kBridgeFsmTimeout;
+int32_t G1LocoController::EnsurePassiveInternalLocked() {
+  int32_t fsm_id = -1;
+  if (QueryFsmIdLocked(fsm_id) != 0) {
+    authority_state_.store(AuthorityState::FAULT);
+    return kBridgeFsmQueryFailed;
+  }
+  if (fsm_id == kPassiveFsmId) {
+    authority_state_.store(AuthorityState::INTERNAL);
+    return 0;
+  }
+  if (fsm_id == kUserControlFsmId) {
+    authority_state_.store(AuthorityState::FAULT);
+    return kBridgeInvalidState;
+  }
+
+  const int32_t damp_result = loco_client_->Damp();
+  last_loco_api_result_.store(damp_result);
+  if (damp_result != 0) {
+    return damp_result;
+  }
+  const int32_t confirm_result = WaitForFsmLocked(kPassiveFsmId);
+  if (confirm_result == 0) {
+    authority_state_.store(AuthorityState::INTERNAL);
+  }
+  return confirm_result;
 }
 
 int32_t G1LocoController::acquire_user_control() {
@@ -344,18 +371,18 @@ int32_t G1LocoController::acquire_user_control() {
     return kBridgeInvalidState;
   }
 
-  int32_t fsm_id = -1;
-  if (QueryFsmIdLocked(fsm_id) != 0) {
-    authority_state_.store(AuthorityState::FAULT);
-    return kBridgeFsmQueryFailed;
-  }
-  if (fsm_id == kUserControlFsmId) {
-    authority_state_.store(AuthorityState::FAULT);
-    return kBridgeInvalidState;
+  const int32_t passive_result = EnsurePassiveInternalLocked();
+  if (passive_result != 0) {
+    return passive_result;
   }
   if (!PrimeHoldCommandLocked()) {
     return kBridgeNoRobotState;
   }
+  active_publish_count_.store(0);
+
+  // Arm the Unitree user-control topic with a safe damping frame before
+  // requesting FSM 1000. Normal PD publishing is still disabled here.
+  PublishPrearmDampingOnce();
 
   authority_state_.store(AuthorityState::ACQUIRING);
   const int32_t switch_result = loco_client_->SwitchToUserCtrl();
@@ -379,11 +406,14 @@ int32_t G1LocoController::acquire_user_control() {
   // following FSM confirmation cannot be completed.
   owns_user_control_.store(true);
 
-  const int32_t confirm_result = WaitForUserFsmLocked();
+  const int32_t confirm_result = WaitForFsmLocked(kUserControlFsmId);
   if (confirm_result == 0) {
     authority_state_.store(AuthorityState::USER_ACTIVE);
     EnablePublishingLocked();
-    WriteLowCommandOnce();
+    if (!WriteLowCommandOnce()) {
+      authority_state_.store(AuthorityState::FAULT);
+      return kBridgeInvalidState;
+    }
     return 0;
   }
 
@@ -392,7 +422,8 @@ int32_t G1LocoController::acquire_user_control() {
   const int32_t fallback_result = loco_client_->SwitchToInternalCtrl(
       unitree::robot::g1::InternalFsmMode::PASSIVE);
   last_loco_api_result_.store(fallback_result);
-  if (fallback_result == 0 && WaitForInternalFsmLocked() == 0) {
+  if (fallback_result == 0 &&
+      WaitForFsmLocked(kPassiveFsmId) == 0) {
     owns_user_control_.store(false);
     authority_state_.store(AuthorityState::INTERNAL);
     ClearCommandLocked();
@@ -427,7 +458,8 @@ void G1LocoController::RestoreUserControlAfterReleaseFailureLocked(
 }
 
 int32_t G1LocoController::ReleaseToInternalLocked(
-    unitree::robot::g1::InternalFsmMode mode) {
+    unitree::robot::g1::InternalFsmMode mode,
+    int32_t expected_fsm_id) {
   if (closed_.load()) {
     return kBridgeClosed;
   }
@@ -436,7 +468,12 @@ int32_t G1LocoController::ReleaseToInternalLocked(
     owns_user_control_.store(false);
     DisablePublishingLocked();
     ClearCommandLocked();
-    return 0;
+    int32_t fsm_id = -1;
+    if (QueryFsmIdLocked(fsm_id) != 0) {
+      authority_state_.store(AuthorityState::FAULT);
+      return kBridgeFsmQueryFailed;
+    }
+    return fsm_id == expected_fsm_id ? 0 : kBridgeUnexpectedFsm;
   }
   if (!owns_user_control_.load()) {
     return kBridgeInvalidState;
@@ -455,7 +492,7 @@ int32_t G1LocoController::ReleaseToInternalLocked(
   last_loco_api_result_.store(switch_result);
   int32_t release_result = switch_result;
   if (switch_result == 0) {
-    release_result = WaitForInternalFsmLocked();
+    release_result = WaitForFsmLocked(expected_fsm_id);
   }
   if (release_result == 0) {
     owns_user_control_.store(false);
@@ -465,16 +502,23 @@ int32_t G1LocoController::ReleaseToInternalLocked(
 
   int32_t fsm_id = -1;
   const int32_t query_result = QueryFsmIdLocked(fsm_id);
-  if (query_result == 0 && fsm_id != kUserControlFsmId) {
+  if (query_result == 0 && fsm_id == expected_fsm_id) {
     owns_user_control_.store(false);
     authority_state_.store(AuthorityState::INTERNAL);
     return 0;
+  }
+  if (query_result == 0 && fsm_id != kUserControlFsmId) {
+    owns_user_control_.store(false);
+    authority_state_.store(AuthorityState::INTERNAL);
+    ClearCommandLocked();
+    return kBridgeUnexpectedFsm;
   }
 
   // Release started from confirmed user ownership. Until an internal FSM is
   // observed, retain that last confirmed authority and keep the hold command.
   if (query_result != 0 || fsm_id == kUserControlFsmId) {
     RestoreUserControlAfterReleaseFailureLocked(last_command);
+    static_cast<void>(WriteLowCommandOnce());
   }
   return query_result == 0 ? release_result : kBridgeFsmQueryFailed;
 }
@@ -482,16 +526,18 @@ int32_t G1LocoController::ReleaseToInternalLocked(
 int32_t G1LocoController::release_to_walkrun() {
   std::lock_guard<std::mutex> lock(authority_mutex_);
   return ReleaseToInternalLocked(
-      unitree::robot::g1::InternalFsmMode::WALKRUN);
+      unitree::robot::g1::InternalFsmMode::WALKRUN,
+      kWalkRunFsmId);
 }
 
 int32_t G1LocoController::release_to_passive() {
   std::lock_guard<std::mutex> lock(authority_mutex_);
   return ReleaseToInternalLocked(
-      unitree::robot::g1::InternalFsmMode::PASSIVE);
+      unitree::robot::g1::InternalFsmMode::PASSIVE,
+      kPassiveFsmId);
 }
 
-void G1LocoController::step(const std::vector<double>& pd_target) {
+uint64_t G1LocoController::step(const std::vector<double>& pd_target) {
   std::lock_guard<std::mutex> lock(authority_mutex_);
   if (closed_.load()) {
     throw std::runtime_error("G1LocoController is closed");
@@ -512,6 +558,10 @@ void G1LocoController::step(const std::vector<double>& pd_target) {
     command.kd.at(i) = static_cast<float>(damping_.at(i));
   }
   motor_command_buffer_.SetData(command);
+  if (!WriteLowCommandOnce()) {
+    throw std::runtime_error("Failed to publish active user LowCmd");
+  }
+  return active_publish_count_.load();
 }
 
 void G1LocoController::set_gains(
@@ -534,9 +584,15 @@ int32_t G1LocoController::close() {
 
   if (owns_user_control_.load()) {
     const int32_t release_result = ReleaseToInternalLocked(
-        unitree::robot::g1::InternalFsmMode::PASSIVE);
+        unitree::robot::g1::InternalFsmMode::PASSIVE,
+        kPassiveFsmId);
     if (release_result != 0 || owns_user_control_.load()) {
       return release_result != 0 ? release_result : kBridgeInvalidState;
+    }
+  } else if (authority_state_.load() == AuthorityState::INTERNAL) {
+    const int32_t passive_result = EnsurePassiveInternalLocked();
+    if (passive_result != 0) {
+      return passive_result;
     }
   }
 

@@ -7,8 +7,9 @@ modify or wrap the third-party `packages/unitree_cpp` module.
 
 The controller starts read-only. Constructing it subscribes to robot state and
 queries the locomotion FSM, but does not call `SwitchToUserCtrl()` and does not
-publish `rt/user_lowcmd`. Publishing is enabled only after the SDK reports FSM
-ID `1000`.
+publish `rt/user_lowcmd`. An explicit acquire first moves the internal controller
+to `PASSIVE`, publishes one damping pre-arm frame, requests user control, and
+only enables continuous PD publishing after the SDK reports FSM ID `1000`.
 
 Install on the G1 computer after installing a compatible official SDK2:
 
@@ -29,6 +30,7 @@ python scripts/run_pipeline.py -c g1_native_loco_mimic
 ```
 
 The process starts in Unitree native locomotion. On the Unitree remote, `Start`
-enters the selected dance, `Select` returns to native `WALKRUN`, `R1`/`L1`
-select the next/previous dance while native locomotion is active, and `A`
-returns an active dance to `PASSIVE` before closing the bridge.
+performs the `WALKRUN -> PASSIVE -> USER_CTRL` handoff and enters the selected
+dance, `Select` returns to native `WALKRUN`, `R1`/`L1` select the next/previous
+dance while native locomotion is active, and `A` confirms `PASSIVE` before
+closing the bridge.

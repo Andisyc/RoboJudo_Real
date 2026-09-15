@@ -129,6 +129,8 @@ PYBIND11_MODULE(_g1_loco_bridge, module) {
            &G1LocoController::get_last_loco_api_result)
       .def("is_publish_enabled",
            &G1LocoController::is_publish_enabled)
+      .def("get_active_publish_count",
+           &G1LocoController::get_active_publish_count)
       .def("acquire_user_control",
            &G1LocoController::acquire_user_control,
            py::call_guard<py::gil_scoped_release>())
@@ -144,6 +146,8 @@ PYBIND11_MODULE(_g1_loco_bridge, module) {
 
   module.attr("USER_CONTROL_FSM_ID") =
       robojudo::g1_loco::kUserControlFsmId;
+  module.attr("PASSIVE_FSM_ID") = robojudo::g1_loco::kPassiveFsmId;
+  module.attr("WALKRUN_FSM_ID") = robojudo::g1_loco::kWalkRunFsmId;
   module.attr("BRIDGE_INVALID_STATE") =
       robojudo::g1_loco::kBridgeInvalidState;
   module.attr("BRIDGE_NO_ROBOT_STATE") =
@@ -153,4 +157,6 @@ PYBIND11_MODULE(_g1_loco_bridge, module) {
   module.attr("BRIDGE_FSM_QUERY_FAILED") =
       robojudo::g1_loco::kBridgeFsmQueryFailed;
   module.attr("BRIDGE_CLOSED") = robojudo::g1_loco::kBridgeClosed;
+  module.attr("BRIDGE_UNEXPECTED_FSM") =
+      robojudo::g1_loco::kBridgeUnexpectedFsm;
 }

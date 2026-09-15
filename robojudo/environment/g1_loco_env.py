@@ -159,6 +159,9 @@ class G1LocoEnv(Environment):
             "fsm_id": int(self.unitree.get_cached_fsm_id()),
             "last_loco_api_result": int(self.unitree.get_last_loco_api_result()),
             "publish_enabled": bool(self.unitree.is_publish_enabled()),
+            "active_publish_count": int(
+                self.unitree.get_active_publish_count()
+            ),
         }
 
     def _handoff(self, operation: str, callback) -> int:
@@ -192,7 +195,12 @@ class G1LocoEnv(Environment):
             raise RuntimeError("G1LocoEnv cannot send PD targets without user control")
         if len(pd_target) != self.num_dofs:
             raise ValueError("pd_target length must match environment num_dofs")
-        self.unitree.step(np.asarray(pd_target, dtype=np.float64).tolist())
+        publish_count = int(
+            self.unitree.step(np.asarray(pd_target, dtype=np.float64).tolist())
+        )
+        if publish_count <= 0:
+            raise RuntimeError("G1LocoEnv active LowCmd was not published")
+        return publish_count
 
     def shutdown(self) -> int:
         if not hasattr(self, "unitree"):

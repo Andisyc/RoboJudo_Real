@@ -22,12 +22,15 @@
 
 namespace robojudo::g1_loco {
 
+constexpr int32_t kPassiveFsmId = 1;
+constexpr int32_t kWalkRunFsmId = 801;
 constexpr int32_t kUserControlFsmId = 1000;
 constexpr int32_t kBridgeInvalidState = -20001;
 constexpr int32_t kBridgeNoRobotState = -20002;
 constexpr int32_t kBridgeFsmTimeout = -20003;
 constexpr int32_t kBridgeFsmQueryFailed = -20004;
 constexpr int32_t kBridgeClosed = -20005;
+constexpr int32_t kBridgeUnexpectedFsm = -20006;
 
 template <typename T>
 class DataBuffer {
@@ -149,12 +152,13 @@ class G1LocoController {
   int32_t get_cached_fsm_id() const;
   int32_t get_last_loco_api_result() const;
   bool is_publish_enabled() const;
+  uint64_t get_active_publish_count() const;
 
   int32_t acquire_user_control();
   int32_t release_to_walkrun();
   int32_t release_to_passive();
 
-  void step(const std::vector<double>& pd_target);
+  uint64_t step(const std::vector<double>& pd_target);
   void set_gains(const std::vector<double>& stiffness,
                  const std::vector<double>& damping);
   int32_t close();
@@ -169,7 +173,9 @@ class G1LocoController {
   void SportStateHandler(const void* message);
   void TorsoImuStateHandler(const void* message);
   void LowCommandWriter();
-  void WriteLowCommandOnce();
+  bool WriteLowCommandOnce();
+  void PublishLowCommandLocked(const MotorCommand& command);
+  void PublishPrearmDampingOnce();
 
   bool PrimeHoldCommandLocked();
   void DisablePublishingLocked();
@@ -177,10 +183,11 @@ class G1LocoController {
   void ClearCommandLocked();
 
   int32_t QueryFsmIdLocked(int32_t& fsm_id);
-  int32_t WaitForUserFsmLocked();
-  int32_t WaitForInternalFsmLocked();
+  int32_t WaitForFsmLocked(int32_t expected_fsm_id);
+  int32_t EnsurePassiveInternalLocked();
   int32_t ReleaseToInternalLocked(
-      unitree::robot::g1::InternalFsmMode mode);
+      unitree::robot::g1::InternalFsmMode mode,
+      int32_t expected_fsm_id);
   void RestoreUserControlAfterReleaseFailureLocked(
       const std::shared_ptr<const MotorCommand>& last_command);
   void CloseNoThrow() noexcept;
@@ -195,6 +202,7 @@ class G1LocoController {
   std::atomic<int32_t> last_loco_api_result_{0};
   std::atomic<uint8_t> mode_machine_{0};
   std::atomic<bool> publish_enabled_{false};
+  std::atomic<uint64_t> active_publish_count_{0};
   std::atomic<bool> owns_user_control_{false};
   std::atomic<bool> initialized_{false};
   std::atomic<bool> closed_{false};

@@ -38,5 +38,4 @@ class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
             policy_name="Waltz", without_state_estimator=False, max_timestep=850
         ),
     ]
-    entry_transition_steps: int = 100
     do_safety_check: bool = True

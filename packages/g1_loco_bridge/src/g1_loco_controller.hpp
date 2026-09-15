@@ -154,7 +154,8 @@ class G1LocoController {
   bool is_publish_enabled() const;
   uint64_t get_active_publish_count() const;
 
-  int32_t acquire_user_control();
+  int32_t acquire_user_control(
+      const std::vector<double>& initial_pd_target);
   int32_t release_to_walkrun();
   int32_t release_to_passive();
 

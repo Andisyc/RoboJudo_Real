@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 class NativeLocoMimicState(Enum):
     NATIVE_LOCO = auto()
-    ENTERING_MIMIC = auto()
     MIMIC_ACTIVE = auto()
     FAULT = auto()
     CLOSED = auto()
@@ -59,9 +58,6 @@ class G1NativeLocoMimicPipeline(Pipeline):
         self.dt = 1.0 / self.freq
         self.state = NativeLocoMimicState.NATIVE_LOCO
         self.should_stop = False
-        self._entry_step = 0
-        self._entry_start = self.env.default_pos.copy()
-        self._entry_target = self.env.default_pos.copy()
 
         self.self_check()
         self.reset()
@@ -108,15 +104,16 @@ class G1NativeLocoMimicPipeline(Pipeline):
         self.freq = self.policy.cfg_policy.freq
         self.dt = 1.0 / self.freq
 
-    def _enter_mimic(self):
+    def _enter_mimic(self, env_data, ctrl_data):
         if self.state != NativeLocoMimicState.NATIVE_LOCO:
             logger.warning("Mimic control is already active or transitioning")
-            return
+            return None
 
         self.policy.reset()
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
-        self._entry_target = self.policy.get_init_dof_pos()
-        result = self.env.acquire_user_control()
+        observation, extras = self.policy.get_observation(env_data, ctrl_data)
+        pd_target = self.policy.get_pd_target(observation)
+        result = self.env.acquire_user_control(pd_target)
         if result != 0:
             logger.error("Failed to acquire G1 user control: %s", result)
             self.state = NativeLocoMimicState.FAULT
@@ -138,19 +135,14 @@ class G1NativeLocoMimicPipeline(Pipeline):
             self.should_stop = True
             raise RuntimeError(f"G1 user control was not armed: {status}")
 
-        self.env.update()
-        self._entry_start = self.env.dof_pos.copy()
-        self._entry_step = 0
-        self.state = NativeLocoMimicState.ENTERING_MIMIC
-        logger.warning("G1 user control acquired; entering mimic: %s", status)
+        self.state = NativeLocoMimicState.MIMIC_ACTIVE
+        logger.warning("G1 user control acquired; mimic policy active: %s", status)
+        return extras, pd_target
 
     def _return_to_native_loco(self):
         if self.state == NativeLocoMimicState.NATIVE_LOCO:
             return
-        if self.state not in (
-            NativeLocoMimicState.ENTERING_MIMIC,
-            NativeLocoMimicState.MIMIC_ACTIVE,
-        ):
+        if self.state != NativeLocoMimicState.MIMIC_ACTIVE:
             logger.error("Cannot return to native loco from state %s", self.state.name)
             return
 
@@ -196,13 +188,14 @@ class G1NativeLocoMimicPipeline(Pipeline):
         logger.error("Failed to close G1 controller safely: %s", result)
         return result
 
-    def _handle_commands(self, commands):
+    def _handle_commands(self, commands, env_data, ctrl_data):
+        initial_mimic_step = None
         for command in commands:
             if command == "[SHUTDOWN]":
                 self._shutdown()
-                return
+                return None
             if command == "[POLICY_MIMIC]":
-                self._enter_mimic()
+                initial_mimic_step = self._enter_mimic(env_data, ctrl_data)
             elif command == "[POLICY_LOCO]":
                 self._return_to_native_loco()
             elif command.startswith("[POLICY_SWITCH]"):
@@ -211,22 +204,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
                     self._select_mimic(1)
                 elif target == "LAST":
                     self._select_mimic(-1)
-
-    def _step_mimic_entry(self, env_data, ctrl_data):
-        observation, extras = self.policy.get_observation(env_data, ctrl_data)
-        progress = min(
-            (self._entry_step + 1) / self.cfg.entry_transition_steps, 1.0
-        )
-        pd_target = (
-            (1.0 - progress) * self._entry_start
-            + progress * self._entry_target
-        )
-        self.env.step(pd_target)
-        self._entry_step += 1
-        if self._entry_step >= self.cfg.entry_transition_steps:
-            self.state = NativeLocoMimicState.MIMIC_ACTIVE
-            logger.warning("Mimic policy active: %s", self.policy.name)
-        return extras, pd_target
+        return initial_mimic_step
 
     def _step_mimic(self, env_data, ctrl_data):
         observation, extras = self.policy.get_observation(env_data, ctrl_data)
@@ -260,7 +238,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
         env_data = self.env.get_data()
         ctrl_data = self.ctrl_manager.get_ctrl_data(env_data)
         commands = ctrl_data.get("COMMANDS", [])
-        self._handle_commands(commands)
+        initial_mimic_step = self._handle_commands(commands, env_data, ctrl_data)
 
         if dry_run or self.state in (
             NativeLocoMimicState.NATIVE_LOCO,
@@ -272,8 +250,8 @@ class G1NativeLocoMimicPipeline(Pipeline):
 
         try:
             step_state = self.state
-            if self.state == NativeLocoMimicState.ENTERING_MIMIC:
-                extras, pd_target = self._step_mimic_entry(env_data, ctrl_data)
+            if initial_mimic_step is not None:
+                extras, pd_target = initial_mimic_step
             else:
                 extras, pd_target = self._step_mimic(env_data, ctrl_data)
         except Exception:

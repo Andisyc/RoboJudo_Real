@@ -177,8 +177,11 @@ class G1LocoEnv(Environment):
         )
         return result
 
-    def acquire_user_control(self) -> int:
-        return self._handoff("USER", self.unitree.acquire_user_control)
+    def acquire_user_control(self, initial_pd_target) -> int:
+        pd_target = np.asarray(initial_pd_target, dtype=np.float64).tolist()
+        return self._handoff(
+            "USER", lambda: self.unitree.acquire_user_control(pd_target)
+        )
 
     def release_to_walkrun(self) -> int:
         return self._handoff("WALKRUN", self.unitree.release_to_walkrun)

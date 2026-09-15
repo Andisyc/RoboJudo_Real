@@ -133,6 +133,7 @@ PYBIND11_MODULE(_g1_loco_bridge, module) {
            &G1LocoController::get_active_publish_count)
       .def("acquire_user_control",
            &G1LocoController::acquire_user_control,
+           py::arg("initial_pd_target"),
            py::call_guard<py::gil_scoped_release>())
       .def("release_to_walkrun", &G1LocoController::release_to_walkrun,
            py::call_guard<py::gil_scoped_release>())

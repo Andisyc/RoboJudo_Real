@@ -8,9 +8,9 @@ modify or wrap the third-party `packages/unitree_cpp` module.
 The controller starts read-only. Constructing it subscribes to robot state and
 queries the locomotion FSM, but does not call `SwitchToUserCtrl()` and does not
 publish `rt/user_lowcmd`. An explicit acquire requires native `WALKRUN`,
-continuously publishes a fully framed hold command at the measured joint
-position during the direct user-control request, and only accepts policy targets
-after the SDK reports FSM ID `1000`.
+continuously publishes the first fully framed policy target during the direct
+user-control request, and confirms FSM ID `1000` before reporting that user
+control is active.
 
 Install on the G1 computer after installing a compatible official SDK2:
 

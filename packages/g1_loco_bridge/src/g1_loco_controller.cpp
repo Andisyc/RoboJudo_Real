@@ -357,10 +357,15 @@ int32_t G1LocoController::EnsurePassiveInternalLocked() {
   return confirm_result;
 }
 
-int32_t G1LocoController::acquire_user_control() {
+int32_t G1LocoController::acquire_user_control(
+    const std::vector<double>& initial_pd_target) {
   std::lock_guard<std::mutex> lock(authority_mutex_);
   if (closed_.load()) {
     return kBridgeClosed;
+  }
+  if (initial_pd_target.size() != num_dofs_) {
+    throw std::invalid_argument(
+        "initial_pd_target size must match num_dofs");
   }
 
   const AuthorityState state = authority_state_.load();
@@ -379,13 +384,19 @@ int32_t G1LocoController::acquire_user_control() {
   if (fsm_id != kWalkRunFsmId) {
     return kBridgeUnexpectedFsm;
   }
-  if (!PrimeHoldCommandLocked()) {
-    return kBridgeNoRobotState;
+
+  MotorCommand command(num_dofs_);
+  for (std::size_t i = 0; i < num_dofs_; ++i) {
+    command.q_target.at(i) =
+        static_cast<float>(initial_pd_target.at(i));
+    command.kp.at(i) = static_cast<float>(stiffness_.at(i));
+    command.kd.at(i) = static_cast<float>(damping_.at(i));
   }
+  motor_command_buffer_.SetData(command);
   active_publish_count_.store(0);
 
-  // Keep one measured-position command streaming through the 801 -> 1000
-  // handoff. Policy targets remain blocked until USER_ACTIVE is confirmed.
+  // Stream the first policy target through the 801 -> 1000 handoff so there
+  // is no separate measured-position hold phase before mimic control.
   authority_state_.store(AuthorityState::ACQUIRING);
   EnablePublishingLocked();
   if (!WriteLowCommandOnce()) {

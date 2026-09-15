@@ -1,6 +1,6 @@
 import logging
 import time
-from multiprocessing import Queue
+from queue import Queue
 
 from robojudo.controller import Controller, ctrl_registry
 from robojudo.controller.ctrl_cfgs import UnitreeCtrlCfg

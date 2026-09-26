@@ -16,6 +16,50 @@ from robojudo.utils.util_func import matrix_from_quat, subtract_frame_transforms
 logger = logging.getLogger(__name__)
 
 
+def _validate_beyondmimic_model_contract(
+    metadata: dict[str, str], action_output_shape: list | tuple,
+) -> tuple[list[str], list[str]]:
+    """Validate the metadata contract before adapting a BeyondMimic model."""
+    required = {
+        "joint_names",
+        "default_joint_pos",
+        "joint_stiffness",
+        "joint_damping",
+        "action_scale",
+        "anchor_body_name",
+        "body_names",
+    }
+    missing = sorted(required.difference(metadata))
+    if missing:
+        raise ValueError(f"BeyondMimic ONNX metadata is missing fields: {missing}")
+
+    def parse_strings(value: str) -> list[str]:
+        return [item for item in value.split(",") if item]
+
+    def count_values(value: str) -> int:
+        return len([item for item in value.split(",") if item])
+
+    joint_names = parse_strings(metadata["joint_names"])
+    body_names = parse_strings(metadata["body_names"])
+    dof_count = len(joint_names)
+    if dof_count not in (23, 29):
+        raise ValueError(f"Unsupported G1 BeyondMimic DoF count: {dof_count}; expected 23 or 29")
+    for field in ("default_joint_pos", "joint_stiffness", "joint_damping", "action_scale"):
+        count = count_values(metadata[field])
+        if count != dof_count:
+            raise ValueError(f"BeyondMimic metadata field '{field}' has {count} values; expected {dof_count}")
+    if metadata["anchor_body_name"] not in body_names:
+        raise ValueError(
+            f"BeyondMimic anchor body '{metadata['anchor_body_name']}' is absent from body_names"
+        )
+    if len(body_names) != 14:
+        raise ValueError(f"BeyondMimic body_names has {len(body_names)} entries; expected 14")
+    output_dim = action_output_shape[-1] if action_output_shape else None
+    if isinstance(output_dim, int) and output_dim != dof_count:
+        raise ValueError(f"BeyondMimic action output has {output_dim} values; metadata has {dof_count}")
+    return joint_names, body_names
+
+
 @policy_registry.register
 class BeyondMimicPolicy(Policy):
     cfg_policy: BeyondMimicPolicyCfg
@@ -52,17 +96,18 @@ class BeyondMimicPolicy(Policy):
             modelmeta = self.session.get_modelmeta()  # all str,
             modelmeta_dict = modelmeta.custom_metadata_map
 
+            joint_names, body_names = _validate_beyondmimic_model_contract(
+                modelmeta_dict, self.session.get_outputs()[0].shape
+            )
+
             # dict_keys(['joint_names', 'run_path', 'command_names', 'joint_stiffness', 'joint_damping',
             # 'default_joint_pos', 'action_scale', 'observation_names', 'anchor_body_name', 'body_names'])
             def parse_floats(s):
                 return [float(item) for item in s.split(",")]
 
-            def parse_strings(s):
-                return [item for item in s.split(",")]
-
             # resolve dof name, default pos, Kp/Kd
             dof_config = DoFConfig(
-                joint_names=parse_strings(modelmeta_dict["joint_names"]),
+                joint_names=joint_names,
                 default_pos=parse_floats(modelmeta_dict["default_joint_pos"]),
                 stiffness=parse_floats(modelmeta_dict["joint_stiffness"]),
                 damping=parse_floats(modelmeta_dict["joint_damping"]),)
@@ -71,7 +116,6 @@ class BeyondMimicPolicy(Policy):
 
             # resolve anchor body point
             anchor_body_name = modelmeta_dict["anchor_body_name"]
-            body_names = parse_strings(modelmeta_dict["body_names"])
             self.motion_anchor_body_index = body_names.index(anchor_body_name)
 
             # command_names = parse_strings(modelmeta_dict["command_names"])

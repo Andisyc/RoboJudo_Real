@@ -36,7 +36,9 @@ from .policy.g1_amo_policy_cfg import G1AmoPolicyCfg  # noqa: F401
 from .policy.g1_asap_policy_cfg import (
     G1AsapLocoPolicyCfg, 
     G1AsapPolicyCfg,)  # noqa: F401
-from .policy.g1_beyondmimic_policy_cfg import G1BeyondMimicPolicyCfg  # noqa: F401
+from .policy.g1_beyondmimic_policy_cfg import (
+    G1BeyondMimic23DoFPolicyCfg,
+    G1BeyondMimicPolicyCfg,)  # noqa: F401
 from .policy.g1_h2h_policy_cfg import G1H2HPolicyCfg  # noqa: F401
 from .policy.g1_kungfubot_policy_cfg import (
     G1KungfuBotGeneralPolicyCfg, 
@@ -385,6 +387,23 @@ class g1_beyondmimic(RlPipelineCfg): # Sim2Sim
         use_modelmeta_config=True,  # use robot dof config from modelmeta
         use_motion_from_model=True,  # use motion from onnx model
         max_timestep=140,
+    )
+
+
+@cfg_registry.register
+class g1_beyondmimic_23dof(RlPipelineCfg): # Sim2Sim
+    """Native G1 23DoF BeyondMimic policy using ONNX model metadata."""
+
+    robot: str = "g1"
+    env: G1_23MujocoEnvCfg = G1_23MujocoEnvCfg()
+    ctrl: list[KeyboardCtrlCfg] = [
+        KeyboardCtrlCfg(),
+    ]
+
+    policy: G1BeyondMimic23DoFPolicyCfg = G1BeyondMimic23DoFPolicyCfg(
+        without_state_estimator=True,
+        use_modelmeta_config=True,
+        use_motion_from_model=True,
     )
 
 

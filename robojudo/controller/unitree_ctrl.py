@@ -1,6 +1,6 @@
 import logging
 import time
-from multiprocessing import Queue
+from queue import Queue
 
 from robojudo.controller import Controller, ctrl_registry
 from robojudo.controller.ctrl_cfgs import UnitreeCtrlCfg
@@ -30,6 +30,15 @@ class UnitreeCtrl(JoystickCtrl):
             self.unitree_env.RemoteControllerHandler = self.unitree_remote_controller.parse
         else:
             logger.warning("No Unitree env, controller not working.")
+
+    def get_data(self):
+        """Read the G1 remote without the generic joystick/ROS mode switch."""
+        events = self.get_events()
+        state = self.get_state()
+        return {
+            "axes": state["axes"],
+            "button_event": events,
+        }
 
 
 if __name__ == "__main__":

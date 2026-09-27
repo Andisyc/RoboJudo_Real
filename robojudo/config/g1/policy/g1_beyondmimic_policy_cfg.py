@@ -81,3 +81,9 @@ class G1BeyondMimicPolicyCfg(BeyondMimicPolicyCfg):
         *[0.439, 0.439, 0.439, 0.439, 0.439, 0.439, 0.439, 0.439, 0.439, 0.439],
         *[0.439, 0.439, 0.439, 0.439, 0.075, 0.075, 0.075, 0.075],
     ]
+
+
+class G1BeyondMimic23DoFPolicyCfg(G1BeyondMimicPolicyCfg):
+    """Model-metadata-driven policy configuration for the native G1 23DoF model."""
+
+    policy_name: str = "g1_23dof"

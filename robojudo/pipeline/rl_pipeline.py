@@ -33,6 +33,16 @@ class PolicyWrapper: # A wrapper for Policy to handle observation and action ada
 
         policy_class: type[Policy] = getattr(robojudo.policy, policy_type)
         self.policy: Policy = policy_class(cfg_policy=cfg_policy, device=device)
+        if policy_type == "BeyondMimicPolicy":
+            policy_joints = set(self.policy.cfg_action_dof.joint_names)
+            env_joints = set(env_dof_cfg.joint_names)
+            if policy_joints != env_joints:
+                missing = sorted(env_joints - policy_joints)
+                extra = sorted(policy_joints - env_joints)
+                raise ValueError(
+                    "BeyondMimic model/environment joint contract mismatch: "
+                    f"missing_in_model={missing}, extra_in_model={extra}"
+                )
         self.obs_adapter = DoFAdapter(env_dof_cfg.joint_names, self.policy.cfg_obs_dof.joint_names)
         self.actions_adapter = DoFAdapter(self.policy.cfg_action_dof.joint_names, env_dof_cfg.joint_names)
 

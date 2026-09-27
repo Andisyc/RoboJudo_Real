@@ -91,3 +91,19 @@ class RlLocoMimicPipelineCfg(PipelineCfg):
                         f"must be in [-{self.upper_dof_num}, 0)")
         
         return self
+
+
+class G1NativeLocoMimicPipelineCfg(PipelineCfg):
+    """Switch a real G1 between its native loco and RoboJuDo mimic policies."""
+
+    pipeline_type: str = "G1NativeLocoMimicPipeline"
+    robot: str = "g1"
+    env: EnvCfg | Any
+    ctrl: list[CtrlCfg | Any] = []
+    mimic_policies: list[PolicyCfg | Any] = []
+
+    @model_validator(mode="after")
+    def check_native_loco_mimic(self):
+        if not self.mimic_policies:
+            raise ValueError("At least one mimic policy is required")
+        return self

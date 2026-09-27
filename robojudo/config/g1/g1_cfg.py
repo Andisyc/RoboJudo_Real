@@ -166,7 +166,7 @@ class g1_real_fada_planner_idm(g1_fada_planner_idm):  # Sim2Real
         env_type="UnitreeCppEnv",
         odometry_type="NONE",
         unitree=G1UnitreeCfg(
-            net_if="eth0",
+            net_if="enp130s0",
             enable_odometry=False,
             enable_torso_imu=True,
         ),

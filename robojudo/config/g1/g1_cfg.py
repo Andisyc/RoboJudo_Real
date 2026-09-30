@@ -168,7 +168,7 @@ class g1_real_fada_planner_idm(g1_fada_planner_idm):  # Sim2Real
         env_type="UnitreeCppEnv",
         odometry_type="NONE",
         unitree=G1UnitreeCfg(
-            net_if="eth0",
+            net_if="enp130s0",
             enable_odometry=False,
             enable_torso_imu=True,
         ),
@@ -401,9 +401,11 @@ class g1_beyondmimic_23dof(RlPipelineCfg): # Sim2Sim
     ]
 
     policy: G1BeyondMimic23DoFPolicyCfg = G1BeyondMimic23DoFPolicyCfg(
-        without_state_estimator=True,
+        policy_name = "eight_cut_3",
+        without_state_estimator=False,
         use_modelmeta_config=True,
         use_motion_from_model=True,
+        max_timestep=11244,
     )
 
 

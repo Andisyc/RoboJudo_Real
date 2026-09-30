@@ -8,7 +8,7 @@ UNITREE_NET_IF="${UNITREE_NET_IF:-eth0}"
 export CYCLONEDDS_URI="file://$(pwd)/cyclonedds.xml"
 
 # 手柄需插在台式服务器，而不是远端笔记本
-export SDL_JOYSTICK_DEVICE=/dev/input/js0
+# export SDL_JOYSTICK_DEVICE=/dev/input/js0
 
 recorder_pid=""
 trajectory_trigger_dir=""

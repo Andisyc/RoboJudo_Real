@@ -401,9 +401,11 @@ class g1_beyondmimic_23dof(RlPipelineCfg): # Sim2Sim
     ]
 
     policy: G1BeyondMimic23DoFPolicyCfg = G1BeyondMimic23DoFPolicyCfg(
-        without_state_estimator=True,
+        policy_name = "eight_cut_3",
+        without_state_estimator=False,
         use_modelmeta_config=True,
         use_motion_from_model=True,
+        max_timestep=11244,
     )
 
 

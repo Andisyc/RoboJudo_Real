@@ -8,6 +8,7 @@ try:
     from sensor_msgs.msg import Joy
 except ImportError:  # ROS2 is optional for local joystick simulation.
     rclpy = None  # type: ignore[assignment]
+    Joy = None  # type: ignore[assignment]
 
 from robojudo.controller import Controller, ctrl_registry
 from robojudo.controller.ctrl_cfgs import JoystickCtrlCfg
@@ -90,7 +91,7 @@ class JoystickCtrl(Controller):
         except Exception as e:
             print(f"[JoystickCtrl] ROS2 initialization skipped or failed: {e}")
 
-    def _ros_cmd_callback(self, msg: Joy):
+    def _ros_cmd_callback(self, msg: "Joy"):
         """Convert incoming Joy message to internal axes+button-event format."""
         now = time.time()
 

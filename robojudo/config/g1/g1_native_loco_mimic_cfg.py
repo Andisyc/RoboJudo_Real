@@ -52,6 +52,8 @@ class g1_native_loco_mimic_23dof(G1NativeLocoMimicPipelineCfg):
     env: G1LocoEnvCfg = G1LocoEnvCfg(
         unitree=G1LocoUnitreeCfg(net_if="enP8p1s0"),
         dof=G1_23DoF(),
+        forward_kinematic=None,
+        update_with_fk=False,
     )
     ctrl: list[UnitreeCtrlCfg] = [
         UnitreeCtrlCfg(

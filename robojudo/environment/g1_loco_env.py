@@ -4,16 +4,30 @@ import logging
 import time
 
 import numpy as np
-from g1_loco_bridge import (  # type: ignore
-    AuthorityState,
-    G1LocoController,
-    RobotState,
-    SportState,
-)
 
 from robojudo.environment import Environment, env_registry
 from robojudo.environment.env_cfgs import UnitreeEnvCfg
 from robojudo.utils.util_func import quat_rotate_inverse_np
+
+
+def _load_g1_loco_bridge(num_dofs: int):
+    """Import the g1_loco_bridge variant matching the robot DoF count."""
+    if num_dofs == 23:
+        from g1_loco_bridge_23dof import (  # type: ignore
+            AuthorityState,
+            G1LocoController,
+            RobotState,
+            SportState,
+        )
+    else:
+        from g1_loco_bridge import (  # type: ignore
+            AuthorityState,
+            G1LocoController,
+            RobotState,
+            SportState,
+        )
+    return AuthorityState, G1LocoController, RobotState, SportState
+
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +50,20 @@ class G1LocoEnv(Environment):
         self._enable_torso_imu = bool(cfg_unitree.enable_torso_imu)
         self._dof_idx = cfg_env.joint2motor_idx
         self._odometry_type = cfg_env.odometry_type
-        self.robot_state: RobotState | None = None
-        self.sport_state: SportState | None = None
+        (
+            self._AuthorityState,
+            self._G1LocoController,
+            self._RobotState,
+            self._SportState,
+        ) = _load_g1_loco_bridge(self.num_dofs)
+        self.robot_state = None
+        self.sport_state = None
 
         cfg_unitree_dict = cfg_unitree.to_dict()
         cfg_unitree_dict["num_dofs"] = self.num_dofs
         cfg_unitree_dict["stiffness"] = self.stiffness.tolist()
         cfg_unitree_dict["damping"] = self.damping.tolist()
-        self.unitree = G1LocoController(cfg_unitree_dict)
+        self.unitree = self._G1LocoController(cfg_unitree_dict)
 
         if self._odometry_type == "ZED":
             if self.cfg_env.zed_cfg is None:
@@ -142,15 +162,15 @@ class G1LocoEnv(Environment):
 
     @property
     def has_user_control(self) -> bool:
-        return self.authority_state == AuthorityState.USER_ACTIVE
+        return self.authority_state == self._AuthorityState.USER_ACTIVE
 
     @property
     def has_internal_control(self) -> bool:
-        return self.authority_state == AuthorityState.INTERNAL
+        return self.authority_state == self._AuthorityState.INTERNAL
 
     @property
     def has_authority_fault(self) -> bool:
-        return self.authority_state == AuthorityState.FAULT
+        return self.authority_state == self._AuthorityState.FAULT
 
     def get_control_status(self) -> dict:
         authority_state = self.authority_state

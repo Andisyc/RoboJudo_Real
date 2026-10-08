@@ -69,7 +69,7 @@ class g1_native_loco_mimic_23dof(G1NativeLocoMimicPipelineCfg):
     ]
     mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = [
         G1BeyondMimic23DoFPolicyCfg(
-            policy_name="g1_23dof", without_state_estimator=True
+            policy_name="eight_cut_1", without_state_estimator=True
         ),
     ]
     do_safety_check: bool = True

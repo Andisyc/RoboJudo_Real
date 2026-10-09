@@ -149,6 +149,11 @@ class G1LocoEnv(Environment):
             self._torso_pos = fk_info[self._torso_name]["pos"]
             self._torso_quat = fk_info[self._torso_name]["quat"]
             self._torso_ang_vel = fk_info[self._torso_name]["ang_vel"]
+        else:
+            # Fallback when FK is disabled: use base pose as torso pose
+            self._torso_pos = self._base_pos
+            self._torso_quat = self._base_quat
+            self._torso_ang_vel = self._base_ang_vel
 
         if self.RemoteControllerHandler is not None:
             self.RemoteControllerHandler(self.robot_state.wireless_remote)

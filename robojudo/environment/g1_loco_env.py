@@ -75,11 +75,12 @@ class G1LocoEnv(Environment):
         self.self_check()
 
     def self_check(self):
-        for _ in range(30):
+        for i in range(100):
             time.sleep(0.1)
             if self.unitree.self_check():
-                logger.info(
-                    "G1LocoEnv self check passed; %d DoF, control remains with Unitree loco",
+                logger.warning(
+                    "G1LocoEnv self check passed after %.1fs; %d DoF, control remains with Unitree loco",
+                    i * 0.1,
                     self.num_dofs,
                 )
                 return

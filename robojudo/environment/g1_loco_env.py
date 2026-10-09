@@ -78,7 +78,10 @@ class G1LocoEnv(Environment):
         for _ in range(30):
             time.sleep(0.1)
             if self.unitree.self_check():
-                logger.info("G1LocoEnv self check passed; control remains with Unitree loco")
+                logger.info(
+                    "G1LocoEnv self check passed; %d DoF, control remains with Unitree loco",
+                    self.num_dofs,
+                )
                 return
         raise RuntimeError(
             "G1LocoEnv self check failed or FSM 1000 is already owned by another process"

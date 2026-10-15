@@ -26,6 +26,7 @@ from .env.g1_dummy_env_cfg import G1DummyEnvCfg  # noqa: F401
 from .env.g1_env_cfg import G1UniLabMujocoDoF  # noqa: F401
 from .env.g1_mujuco_env_cfg import (
     G1_12MujocoEnvCfg, 
+    G1_23BackpackMujocoEnvCfg,
     G1_23MujocoEnvCfg, 
     G1MujocoEnvCfg,
     G1UniLabMujocoEnvCfg,)  # noqa: F401
@@ -406,6 +407,22 @@ class g1_beyondmimic_23dof(RlPipelineCfg): # Sim2Sim
         use_modelmeta_config=True,
         use_motion_from_model=True,
         max_timestep=11244,
+    )
+
+
+@cfg_registry.register
+class g1_beyondmimic_23dof_backpack(RlPipelineCfg):  # Sim2Sim
+    """G1 23DoF BeyondMimic policy with the 0.8 kg backpack model."""
+
+    robot: str = "g1"
+    env: G1_23BackpackMujocoEnvCfg = G1_23BackpackMujocoEnvCfg()
+    ctrl: list[KeyboardCtrlCfg] = [KeyboardCtrlCfg()]
+    policy: G1BeyondMimic23DoFPolicyCfg = G1BeyondMimic23DoFPolicyCfg(
+        policy_name="eight_cut_1_backpack",
+        without_state_estimator=False,
+        use_modelmeta_config=True,
+        use_motion_from_model=True,
+        max_timestep=11252,
     )
 
 

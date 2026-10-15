@@ -73,3 +73,35 @@ class g1_native_loco_mimic_23dof(G1NativeLocoMimicPipelineCfg):
         ),
     ]
     do_safety_check: bool = True
+
+
+@cfg_registry.register
+class g1_native_loco_mimic_23dof_backpack(G1NativeLocoMimicPipelineCfg):
+    """Unitree native WALKRUN handoff to the backpack-trained 23DoF policy."""
+
+    env: G1LocoEnvCfg = G1LocoEnvCfg(
+        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0"),
+        dof=G1_23DoF(),
+        forward_kinematic=None,
+        update_with_fk=False,
+    )
+    ctrl: list[UnitreeCtrlCfg] = [
+        UnitreeCtrlCfg(
+            combination_init_buttons=[],
+            triggers={
+                "A": "[SHUTDOWN]",
+                "Select": "[POLICY_LOCO]",
+                "Start": "[POLICY_MIMIC]",
+                "R1": "[POLICY_SWITCH],NEXT",
+                "L1": "[POLICY_SWITCH],LAST",
+            },
+        )
+    ]
+    mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = [
+        G1BeyondMimic23DoFPolicyCfg(
+            policy_name="eight_cut_1_backpack",
+            without_state_estimator=False,
+            max_timestep=11252,
+        ),
+    ]
+    do_safety_check: bool = True

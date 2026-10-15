@@ -240,6 +240,16 @@ class G1_23EnvCfg(EnvCfg):
     torso_name: str = "torso_link"
 
 
+class G1_23BackpackEnvCfg(G1_23EnvCfg):
+    xml: str = (ASSETS_DIR / "robots/g1/g1_23dof_backpack.xml").as_posix()
+
+    forward_kinematic: ForwardKinematicCfg | None = ForwardKinematicCfg(
+        xml_path=xml,
+        debug_viz=False,
+        kinematic_joint_names=G1_23DoF().joint_names,
+    )
+
+
 class G1_12EnvCfg(EnvCfg):
     xml: str = (ASSETS_DIR / "robots/g1/g1_12dof.xml").as_posix()
 

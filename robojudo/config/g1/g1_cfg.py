@@ -183,8 +183,8 @@ def _fada_comparison_policy(method: str) -> G1FADAPlannerIDMPolicyCfg:
         checkpoint_filename="planner_idm.pt",
         online_adaptation=FADAOnlineAdaptationCfg(
             method=method,
-            # Set a measured deployment receive-age budget before online use.
-            max_sensor_age_s=None,
+            # Initial receive-age limit: one 50 Hz control period, not a measured guarantee.
+            max_sensor_age_s=0.02,
         ),
     )
 

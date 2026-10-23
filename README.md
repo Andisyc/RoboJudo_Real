@@ -594,12 +594,12 @@ with the original ONNX.
   inherit its G1 position-control/torso-IMU/safety configuration.
   Configure the interface in `cyclonedds.xml` consistently as well; the network
   setup remains a deployment-host responsibility.
-- In `_fada_comparison_policy`, replace `max_sensor_age_s=None` with an explicit
-  positive **local receive-age** budget established for that deployment. Online
-  profiles intentionally refuse to start without it, before constructing the
-  hardware environment. This budget is not a robot-clock synchronization or
-  physical actuation-latency measurement. Do not copy the smoke fixture's 0.01s
-  value as an accepted hardware threshold.
+- The shared comparison helper sets `max_sensor_age_s=0.02` (20ms, one nominal
+  50Hz control period) as an initial **local receive-age** limit. It is not a
+  measured device-timing guarantee or a physical actuation-latency budget.
+  Missing/non-positive values remain rejected, and the collector still requires
+  successor reception after the preceding submission. This setting does not
+  open the velocity-triggered learning gate or admit stale/missing evidence.
 - Native build/import and actual DDS/IMU reception, device timing and physical
   stop response remain unverified. Do not treat the commands as approval to
   stand, walk or add a load.

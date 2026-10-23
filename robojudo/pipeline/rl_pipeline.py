@@ -346,6 +346,10 @@ class RlPipeline(Pipeline):
                 self.request_stop()
                 return
             online.set_control_active(active)
+        elif self._fada_adapter is not None:
+            self._fada_adapter.set_control_active(
+                not dry_run and not self._preparing and not self._checking
+            )
         preserve_state = bool(
             getattr(self.policy.cfg_policy, "preserve_state_during_dry_run", True)
         )

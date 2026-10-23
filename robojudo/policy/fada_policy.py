@@ -175,6 +175,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
 
     def set_control_active(self, active: bool):
         if self.online_coordinator is None:
+            self._control_active = bool(active)
             return
         if self._stopping:
             raise RuntimeError("FADA control has stopped")
@@ -390,11 +391,11 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             candidate, self._pending_observation
         ):
             raise ValueError("FADA action observation does not match the pending control step")
-        if self.online_coordinator is None:
+        if self.online_coordinator is None and self._control_active is not False:
             action_tensor = self.playback_controller.act(candidate, self._pending_command)
         else:
             histories = self.playback_controller.prepare_query(candidate, self._pending_command)
-            if self._control_active:
+            if self.online_coordinator is not None and self._control_active:
                 coordinator = self.online_coordinator
                 if not self._adaptation_started and np.any(self._pending_command != 0.0):
                     self._adaptation_started = True
@@ -422,7 +423,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             else:
                 action_tensor = self._runtime["runner"].infer(*histories)
         action = action_tensor.squeeze(0).detach().cpu().numpy().astype(np.float32)
-        if self.online_coordinator is None:
+        if self.online_coordinator is None and self._control_active is not False:
             self.last_action = action.copy()
         self._pending_observation = None
         self._pending_command = None

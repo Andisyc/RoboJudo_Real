@@ -35,12 +35,15 @@ def install_submodules(selected=None):
         patches = info.get("patches", [])
         addons = info.get("addons", [])
 
-        print(f"Initializing submodule '{name}'...")
-        # If submodule already initialized, clean it first
-        if (path / ".git").exists():
-            print(f"Cleaning existing submodule '{name}'...")
-            run(f"cd {path} && git reset --hard && git clean -fd")
-        run(f"git submodule update --init {path}")
+        if info.get("submodule", True):
+            print(f"Initializing submodule '{name}'...")
+            # If submodule already initialized, clean it first
+            if (path / ".git").exists():
+                print(f"Cleaning existing submodule '{name}'...")
+                run(f"cd {path} && git reset --hard && git clean -fd")
+            run(f"git submodule update --init {path}")
+        else:
+            print(f"Using repository-owned source '{path}'...")
 
         if not path.exists():
             print(f"Path {path} does not exist. Skipping {name}.")

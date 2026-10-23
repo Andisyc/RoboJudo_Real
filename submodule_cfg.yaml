@@ -12,11 +12,12 @@ mujoco_viewer:
     - ../patches/mujoco_viewer.patch
 
 
-# Python binding for Unitree SDK2, https://github.com/HansZ8/unitree_cpp
-# need to install Unitree SDK2 first
+# Repository-owned Unitree SDK2 binding with streaming receive evidence.
+# The original packages/unitree_cpp submodule remains an upstream reference.
 unitree_cpp:
   install: false
-  path: packages/unitree_cpp
+  path: packages/unitree_cpp_ttt
+  submodule: false
 
 
 # For OmniH2O, motionlib controller

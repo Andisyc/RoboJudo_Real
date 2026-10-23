@@ -1,7 +1,7 @@
 # Current task
 
 Goal: 将 TTT 的旧流式 FADA 和新冻结基座轨迹差分方法接入 RoboJudo_Real 的 G1 真机部署链，保留冻结推理模式，并以离线闭环与单独授权的真机验证区分工程接通和实际效果。
-Do not: 本轮仅实施已确认的速度触发在线学习门控、相对采集计时、受影响的 SDK-free 入口用例及既有 README/本板同步。不修改 RlPipeline 控制激活逻辑、启动脚本、速度大小/输入方式、网卡/XML、环境、native、损失/窗口/频率数值、worker 协议、PD 或关节顺序；不推送/部署，不运行服务器、DDS 或真机命令。用户自行配置服务器与真机的有线网络；不取消 max_sensor_age_s 等已有前置检查。
+Do not: 本轮仅修改 start.sh 的两处 "$@" 参数透传并移除过时注释，运行一次无硬件 wrapper smoke，同步既有 README/本板。不改 Python 默认配置、键盘后端实现、在线算法、网卡/XML、录制策略、信号/清理逻辑、环境或 native；不提交/推送/部署，不执行远端或机器人控制命令。保留 env -u DISPLAY 原有控制台输入路线和所有原生/时效前置检查。
 
 Current identity:
 - 目标: `/Users/chengyuxuan/ArtiIntComVis/RoboJudo_Real`，当前 `release`，基线 `8ee66e918e3d2370bd3c262cbd1388f0872a3ad0`；调研开始时工作区干净。路线以当前 release 为基线，不授权 Git 操作。
@@ -87,6 +87,9 @@ Progress:
   - Velocity-gate follow-up/timing: coordinator 增加 collection_start_control_step/collection_step 状态，未触发时均为 None，保持原 worker.state 枚举。使用真实 evidence.control_step 定位与样本身份，首次 active observe 设采集锚点，warmup/interval 仅用相对差值；reset 清锚点但保留既有成熟旧批/在途 job/待发布结果/worker/Adam 规则。没有把中途开始的采集伪造成 control_step=0。
   - Velocity-gate follow-up/evidence: 唯一一次 uv SDK-free 工作流只运行改造后的 `TestFADADeploymentIntegration.test_registered_comparison_profiles_run_through_main`，1 个用例含 none/fada/expert_difference 三模式，4.752s 全部 OK，命令墙钟 6.34s。真实 -c/ConfigManager/main/prepare/control/finally、小型真实网络/LoRA 和 spawn worker；53 个零速实际步 (>warmup且非 interval 整倍数) 内无样本/job/更新，receipt 后动作历史/计步仍推进；w 触发保留原历史，以真实步53为起点，相对40步才提交。首个结果完成但未应用时 reset，随后12个零速步不发布且 actor 不变；s 重新触发才应用 version=1/改变固定探针输出，再 x 归零仍继续采集；同一 worker 保留且最后进程/接收线程均回收。none 全参数不变。
   - Velocity-gate follow-up/tests and delivery: 原 Commands 夹具增加真实格式的一次性 keyboard event；基本 `exercise_mode` 的 online 正向用例改为显式 w，不把零速自动学习旧行为重新固定。只执行上述新入口风险用例，没有重跑其他套件/审查。README 解释一次性门控、相对计时、reset 旧结果发布和新增状态；按用户实际 Conda/Python 部署入口修正命令并保留 DDS XML 选择，不改任何启动脚本或环境。本轮未连接或修改远端，代码尚需用户自行同步到服务器。
+  - Wrapper follow-up/change: 用户确认保留 `env -u DISPLAY ./start.sh`；本轮仅把 start.sh 的 Python 调用改成 `python scripts/run_pipeline.py "$@"`、末尾改成 `run_controller "$@"`，删除要求手改 Python 默认参数的过时注释。未改无参数默认行为、DDS、后台录制、信号或退出清理，未新增 launcher。
+  - Wrapper follow-up/evidence: 一次 uv 驱动的无硬件 smoke 实际执行 start.sh，临时 python 替身隔离实际 recorder/controller，controller 分支调用真实 run_pipeline.py 的 parse_args/ConfigManager，确认 -c 解析成 g1_real_fada_expert_online、method=expert_difference；原 DISPLAY=:wrapper-probe 被 env -u DISPLAY 清除，controller DDS XML 保留、recorder DDS 环境仍清除，替身录制进程收到终止、触发目录清除。命令墙钟 2.57s；临时文件全部回收，无新永久测试/全面检查，无实际 SDK/机器人启动。
+  - Wrapper follow-up/delivery: README 已去掉“start.sh 不转发 -c”的旧说明，给出保留控制台输入的 wrapper 命令和 Linux auto 后端选择原因。仅本地修改，未自动同步服务器；网络、传感器时效和真实绑定仍依原有部署要求，不由参数透传 smoke 代替。
 
 - [x] 6. 离线闭环与启动交付 — 三模式注册配置、正式入口离线验证及启动说明已完成；第 2 步原生依赖仍阻塞，不能记为 6/6。
   - Changed/owners: `robojudo/config/g1/g1_cfg.py` 增加共享 `_fada_comparison_policy` 和注册 `g1_real_fada_baseline` / `g1_real_fada_online` / `g1_real_fada_expert_online`；既有测试文件增加 `TestFADADeploymentIntegration.test_registered_comparison_profiles_run_through_main`；仅同步 README/本板。未修改第 5 步控制代码、优化目标、协议、native 或默认 ONNX。
@@ -103,4 +106,4 @@ Blockers:
 - 本轮本地离线验证继续使用既有共享 uv/实际缓存依赖，未修改环境。远端网卡和 CycloneDDS XML 由用户手动配置；max_sensor_age_s 仍需部署时显式设置，不用测试预算替代实际预算。目标设备实时余量、停机效果及生产 PT/ONNX 同源性仍未证明。
 
 Next:
-- 由用户将本轮本地门控修改同步到服务器；网卡由用户自行配置，原生绑定补验及实际部署仍按单独授权执行。
+- 由用户将本轮 start.sh 参数透传修改同步到服务器，再沿用 env -u DISPLAY ./start.sh 并显式指定 -c；网络及实际部署由用户控制，本轮不远端启动。

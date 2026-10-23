@@ -114,8 +114,7 @@ handle_signal() {
 }
 
 run_controller() {
-    # 启动命令，请自己修改run_pipeline.py内的参数
-    python scripts/run_pipeline.py
+    python scripts/run_pipeline.py "$@"
 }
 
 trap on_exit EXIT
@@ -125,6 +124,6 @@ trap 'handle_signal 143' TERM
 if ! start_trajectory_recorder; then
     exit 1
 fi
-run_controller
+run_controller "$@"
 controller_status=$?
 exit "${controller_status}"

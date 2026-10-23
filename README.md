@@ -640,7 +640,19 @@ Ctrl-C exits through the common safety-request/cleanup path; the generic
 Unitree-controller `A` mapping below is not selected by these profiles.
 Independently verify the physical emergency-stop procedure before any live use.
 These direct commands do not start the optional trajectory recorder from
-`start.sh`; that wrapper retains its own invocation and does not forward `-c`.
+`start.sh`. To retain the existing SSH-console/DDS/recorder launch route, use
+the wrapper, which now forwards all arguments to the Python entry:
+
+```bash
+env -u DISPLAY ./start.sh \
+  -c g1_real_fada_expert_online
+```
+
+On Linux, unsetting `DISPLAY` selects the `terminal` keyboard backend when the
+backend setting is `auto`; a server `DISPLAY=:0` would otherwise select
+`pynput`. The wrapper still handles its original DDS configuration and recorder
+cleanup. Replace only the configuration name for legacy or frozen comparisons;
+no-argument invocation retains the Python entry's existing default.
 After preparation, issue a velocity command to start online collection. In the
 existing keyboard configuration, `w` requests forward velocity and `x` clears
 the requested velocity; neither key is a physical emergency-stop guarantee.

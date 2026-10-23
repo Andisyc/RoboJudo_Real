@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
+from numbers import Integral
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +20,9 @@ from .fada.observation import (
     FADA_G1_STATE_OBSERVATION_CONTRACT,
 )
 from .fada.playback import FADAPlaybackController
+from .fada.online_controller import FADAOnlineCoordinator
+from .fada.online_data import FADAControlEvidence
+from .fada.online_runtime import prepare_fada_trainable_runtime
 from .unilab_policy import UniLabPolicy
 
 logger = logging.getLogger(__name__)
@@ -28,14 +33,21 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
     """RoboJuDo runtime adapter for a native FADA Planner-IDM checkpoint."""
 
     def __init__(self, cfg_policy, device):
+        self.online_coordinator = None
+        self._control_active = None
+        self._control_step = 0
+        self._pending_snapshot = None
+        self._pending_evidence = None
+        self._pending_sensor = None
+        self._stopping = False
         super().__init__(cfg_policy=cfg_policy, device=device)
         self.gait_phase_enabled = bool(cfg_policy.gait_phase_enabled)
         self.fixed_gait_phase = np.asarray(cfg_policy.fixed_gait_phase, dtype=np.float32)
         if self.fixed_gait_phase.shape != (2,):
             raise ValueError("FADA fixed_gait_phase must contain two values")
         self.execution_action_scale = float(cfg_policy.execution_action_scale)
-        if self.execution_action_scale <= 0.0:
-            raise ValueError("FADA execution_action_scale must be positive")
+        if not np.isfinite(self.execution_action_scale) or self.execution_action_scale <= 0.0:
+            raise ValueError("FADA execution_action_scale must be finite and positive")
         self.keyboard_command_magnitudes = np.asarray(
             cfg_policy.keyboard_command_magnitudes, dtype=np.float32
         )
@@ -61,6 +73,10 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         self._pending_command: np.ndarray | None = None
         self._pending_observation: np.ndarray | None = None
         self.reset()
+        if cfg_policy.online_adaptation.method != "none":
+            self.online_coordinator = FADAOnlineCoordinator(
+                self._runtime["runner"], cfg_policy.online_adaptation,
+            )
 
     def _build_runtime(self, policy_file: str):
         suffix = Path(policy_file).suffix.lower()
@@ -72,6 +88,12 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             int(self.cfg_policy.prediction_horizon),
             FADA_G1_STATE_OBSERVATION_CONTRACT,
         )
+        if self.cfg_policy.online_adaptation.method != "none":
+            runtime = prepare_fada_trainable_runtime(self.cfg_policy, device=self.device)
+            return {
+                "kind": "fada_planner_idm_online", "model": runtime.policy,
+                "runner": runtime, "contract": expected_contract,
+            }
         if suffix == ".onnx":
             runner = FADAOnnxRuntime(
                 policy_file,
@@ -135,6 +157,66 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             self._torso_imu_projector.reset()
         self._pending_command = None
         self._pending_observation = None
+        self._pending_snapshot = None
+        self._pending_evidence = None
+        self._pending_sensor = None
+        self._control_step = 0
+        if self.online_coordinator is not None:
+            self.online_coordinator.reset()
+            self._control_active = False
+
+    def start_online(self):
+        if self.online_coordinator is not None:
+            self.online_coordinator.start()
+
+    def set_control_active(self, active: bool):
+        if self.online_coordinator is None:
+            return
+        if self._stopping:
+            raise RuntimeError("FADA control has stopped")
+        if active and self.online_coordinator.worker.state not in ("READY", "BUSY"):
+            raise RuntimeError("online FADA learner is not ready for active control")
+        if bool(active) != self._control_active:
+            if self._control_active is True:
+                self.online_coordinator.reset()
+            self.playback_controller.reset()
+            self.last_action = np.zeros(self.num_actions, dtype=np.float32)
+            self._pending_snapshot = None
+            self._pending_evidence = None
+            self._control_step = 0
+        self._control_active = bool(active)
+
+    def confirm_action_submission(self, submitted_ns: int | None):
+        if self._stopping or self._pending_snapshot is None or self._pending_evidence is None:
+            raise RuntimeError("FADA submission requires one active unconfirmed query")
+        if isinstance(submitted_ns, bool) or not isinstance(submitted_ns, Integral) or submitted_ns <= 0:
+            raise RuntimeError("FADA command was not confirmed by the environment")
+        read_started = self._pending_evidence.sensor_read_started_ns
+        if read_started is not None and submitted_ns < read_started:
+            raise RuntimeError("FADA submission precedes its sensor read")
+        snapshot = self._pending_snapshot
+        evidence = replace(
+            self._pending_evidence, action_dispatched=True,
+            action_submitted_ns=int(submitted_ns),
+        )
+        self.playback_controller.commit_action(snapshot.action_snapshot)
+        self.last_action = snapshot.action_snapshot.squeeze(0).cpu().numpy().copy()
+        self.online_coordinator.record_action(snapshot, evidence)
+        self._pending_snapshot = None
+        self._pending_evidence = None
+        self._control_step += 1
+
+    def request_stop(self):
+        self._stopping = True
+        self._pending_snapshot = None
+        self._pending_evidence = None
+        if self.online_coordinator is not None:
+            self.online_coordinator.request_stop()
+
+    def close(self):
+        self.request_stop()
+        if self.online_coordinator is not None:
+            self.online_coordinator.close()
 
     def snapshot_state(self) -> dict[str, object]:
         state: dict[str, object] = dict(super().snapshot_state())
@@ -156,6 +238,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         return state
 
     def restore_state(self, state: dict[str, object]):
+        if self.online_coordinator is not None and self._control_active:
+            raise RuntimeError("cannot rewind an active online physical history")
         super().restore_state(state)  # type: ignore[arg-type]
         self._held_motion_keys = set(state["held_motion_keys"])  # type: ignore[arg-type]
         self._keyboard_command = np.asarray(
@@ -227,6 +311,19 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         return self._keyboard_command.copy()
 
     def get_observation(self, env_data, ctrl_data):
+        if self._stopping:
+            raise RuntimeError("FADA control has stopped")
+        if self._pending_snapshot is not None:
+            raise RuntimeError("previous FADA action has not been confirmed")
+        if self.online_coordinator is not None and self._control_active is None:
+            raise RuntimeError("online FADA requires a lifecycle-aware single-policy pipeline")
+        if self.online_coordinator is not None and self._control_active:
+            self._pending_sensor = {
+                name: env_data.get(name) for name in (
+                    "sensor_tick", "torso_imu_sequence", "lowstate_age_s",
+                    "torso_imu_age_s", "sensor_read_started_ns",
+                )
+            }
         commands = self._get_commands(ctrl_data)
         policy_gyro = getattr(env_data, "policy_gyro", None)
         policy_gravity = getattr(env_data, "policy_gravity", None)
@@ -284,17 +381,30 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             candidate, self._pending_observation
         ):
             raise ValueError("FADA action observation does not match the pending control step")
-        action = (
-            self.playback_controller.act(candidate, self._pending_command)
-            .squeeze(0)
-            .detach()
-            .cpu()
-            .numpy()
-            .astype(np.float32)
-        )
-        # The FADA actor observation and IDM history use raw policy actions.
-        # Only the MuJoCo joint-position target uses UniLab's action scale.
-        self.last_action = action.copy()
+        if self.online_coordinator is None:
+            action_tensor = self.playback_controller.act(candidate, self._pending_command)
+        else:
+            histories = self.playback_controller.prepare_query(candidate, self._pending_command)
+            if self._control_active:
+                coordinator = self.online_coordinator
+                evidence = FADAControlEvidence(
+                    episode_id=coordinator.episode_id, control_step=self._control_step,
+                    policy_version=coordinator.policy_version,
+                    policy_control_active=True, action_dispatched=False,
+                    **self._pending_sensor,
+                )
+                coordinator.observe(histories[0][:, -1], histories[2], evidence)
+                coordinator.apply_pending_at_step_boundary()
+                coordinator.try_submit()
+                snapshot = coordinator.runtime.infer_with_snapshot(*histories)
+                self._pending_snapshot = snapshot
+                self._pending_evidence = replace(evidence, policy_version=coordinator.policy_version)
+                action_tensor = snapshot.action_snapshot
+            else:
+                action_tensor = self._runtime["runner"].infer(*histories)
+        action = action_tensor.squeeze(0).detach().cpu().numpy().astype(np.float32)
+        if self.online_coordinator is None:
+            self.last_action = action.copy()
         self._pending_observation = None
         self._pending_command = None
         return action * self.execution_action_scale

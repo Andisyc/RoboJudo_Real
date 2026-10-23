@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class PolicyWrapper: # A wrapper for Policy to handle observation and action adaptation.
-    def __init__(self, cfg_policy: PolicyCfg, env_dof_cfg: DoFConfig, device: str):
+    def __init__(self, cfg_policy: PolicyCfg, env_dof_cfg: DoFConfig, device: str,
+                 *, prepared_policy: Policy | None = None):
         self.env_dof_cfg = env_dof_cfg
 
         policy_type = cfg_policy.policy_type
@@ -32,7 +33,10 @@ class PolicyWrapper: # A wrapper for Policy to handle observation and action ada
         self.name = policy_name
 
         policy_class: type[Policy] = getattr(robojudo.policy, policy_type)
-        self.policy: Policy = policy_class(cfg_policy=cfg_policy, device=device)
+        self.policy: Policy = (
+            prepared_policy if prepared_policy is not None
+            else policy_class(cfg_policy=cfg_policy, device=device)
+        )
         self.obs_adapter = DoFAdapter(env_dof_cfg.joint_names, self.policy.cfg_obs_dof.joint_names)
         self.actions_adapter = DoFAdapter(self.policy.cfg_action_dof.joint_names, env_dof_cfg.joint_names)
 
@@ -171,47 +175,113 @@ class PolicyWrapper: # Optimized PolicyWrapper for End-to-End GPU execution
 @pipeline_registry.register
 class RlPipeline(Pipeline):
     cfg: RlPipelineCfg
+    # Multi-policy subclasses deliberately bypass this constructor.
+    _fada_adapter = None
+    _online_policy = None
+    _stop_requested = False
+    _closed = False
+    _preparing = False
+    _checking = False
+    _env_shutdown_attempted = False
+    _env_shutdown_error = None
 
     def __init__(self, cfg: RlPipelineCfg):
         super().__init__(cfg=cfg)
 
-        # load in environment (unitree or dummy)
-        env_class: type[Environment] = getattr(robojudo.environment, self.cfg.env.env_type)
-        self.env: Environment = env_class(cfg_env=self.cfg.env, device=self.device)
+        try:
+            prepared_policy = None
+            if self.cfg.policy.policy_type == "FADAPlannerIDMPolicyAdapter":
+                policy_class = getattr(robojudo.policy, self.cfg.policy.policy_type)
+                prepared_policy = policy_class(cfg_policy=self.cfg.policy, device=self.device)
+                self._fada_adapter = prepared_policy
+                if prepared_policy.online_coordinator is not None:
+                    self._online_policy = prepared_policy
 
-        # load in controller (keyboard or joystick)
-        self.ctrl_manager = CtrlManager(cfg_ctrls=self.cfg.ctrl, env=self.env, device=self.device)
+            env_class: type[Environment] = getattr(robojudo.environment, self.cfg.env.env_type)
+            if self._online_policy is not None:
+                if self.cfg.env.env_type != "UnitreeCppEnv":
+                    raise ValueError("online FADA requires the single-policy UnitreeCppEnv deployment")
+                env_class.validate_online_config(self.cfg.env)
+                self._online_policy.start_online()
+            self.env: Environment = env_class(cfg_env=self.cfg.env, device=self.device)
+            self.ctrl_manager = CtrlManager(cfg_ctrls=self.cfg.ctrl, env=self.env, device=self.device)
+            self.policy = PolicyWrapper(
+                cfg_policy=self.cfg.policy, env_dof_cfg=self.env.dof_cfg,
+                device=self.device, prepared_policy=prepared_policy,
+            )
+            self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
+            self.visualizer = self.env.visualizer
+            self.freq = self.cfg.policy.freq
+            self.dt = 1.0 / self.freq
+            self.self_check()
+            self.reset()
+        except BaseException:
+            try:
+                self.close()
+            except BaseException:
+                logger.exception("Pipeline initialization cleanup failed")
+            raise
 
-        # load in policy (for obs & action)
-        self.policy = PolicyWrapper(
-            cfg_policy=self.cfg.policy,
-            env_dof_cfg=self.env.dof_cfg,
-            device=self.device,)
-        
-        # load in dof_cfg & mujoco
-        # (dummy & unitree visualizer=None)
-        self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
-        self.visualizer = self.env.visualizer
+    def should_stop(self):
+        return self._stop_requested
 
-        # load in freq & cycle
-        self.freq = self.cfg.policy.freq
-        self.dt = 1.0 / self.freq
+    def request_stop(self):
+        self._stop_requested = True
+        try:
+            env = getattr(self, "env", None)
+            if env is not None and not self._env_shutdown_attempted:
+                self._env_shutdown_attempted = True
+                try:
+                    env.shutdown()
+                except BaseException as error:
+                    self._env_shutdown_error = error
+                    raise
+            elif self._env_shutdown_error is not None:
+                raise self._env_shutdown_error
+        finally:
+            if self._fada_adapter is not None:
+                self._fada_adapter.request_stop()
 
-        self.self_check()
-        self.reset()
+    def close(self):
+        if self._closed:
+            return
+        errors = []
+        try:
+            self.request_stop()
+        except BaseException as error:
+            errors.append(error)
+        try:
+            if self._fada_adapter is not None:
+                self._fada_adapter.close()
+        except BaseException as error:
+            errors.append(error)
+        self._closed = True
+        if len(errors) == 1:
+            raise errors[0]
+        if errors:
+            raise BaseExceptionGroup("Pipeline cleanup failures", errors)
 
     def self_check(self):
-        self.env.self_check()
-        for _ in range(10):
-            self.step(dry_run=True)
+        self._checking = True
+        try:
+            self.env.self_check()
+            for _ in range(10):
+                self.step(dry_run=True)
+        finally:
+            self._checking = False
 
     def reset(self):
+        if self.should_stop():
+            raise RuntimeError("cannot reset a stopped pipeline")
         logger.info("Pipeline reset")
         self.timestep = 0
 
-        self.env.reset()
-        # self.env.reborn(init_qpos=[0.2, 0.2, 0.8] + [ 0.707, 0, 0, 0.707]) # FOR SIM DEBUG
-        self.policy.reset()
+        if self._online_policy is not None:
+            self.policy.reset()
+            self.env.reset()
+        else:
+            self.env.reset()
+            self.policy.reset()
         self.ctrl_manager.reset()
 
     def safety_check(self):
@@ -224,7 +294,7 @@ class RlPipeline(Pipeline):
             if hasattr(self.env, "reborn"):
                 self.env.reborn()  # pyright: ignore[reportAttributeAccessIssue]
             else:
-                self.env.shutdown()
+                self.request_stop()
 
     def post_step_callback(self, env_data, ctrl_data, extras, pd_target):
         self.timestep += 1
@@ -234,7 +304,7 @@ class RlPipeline(Pipeline):
                 # case "[SHUTDOWN]":
             if command == "[SHUTDOWN]":
                 logger.warning("Emergency shutdown!")
-                self.env.shutdown()
+                self.request_stop()
                 # case "[SIM_REBORN]":
             elif command == "[SIM_REBORN]":
                 if hasattr(self.env, "reborn"):
@@ -257,17 +327,40 @@ class RlPipeline(Pipeline):
                 timestep=self.timestep,)
 
     def step(self, dry_run=False):
+        if self.should_stop():
+            return
+        try:
+            self._step_control(dry_run)
+        except BaseException:
+            try:
+                self.request_stop()
+            except BaseException:
+                logger.exception("Actuator safety request failed")
+            raise
+
+    def _step_control(self, dry_run):
+        online = self._online_policy
+        if online is not None:
+            active = not dry_run and not self._preparing and not self._checking
+            if active and not self.env.enabled:
+                self.request_stop()
+                return
+            online.set_control_active(active)
         preserve_state = bool(
             getattr(self.policy.cfg_policy, "preserve_state_during_dry_run", True)
         )
         policy_state = (
             self.policy.snapshot_state()
-            if dry_run and preserve_state and hasattr(self.policy, "snapshot_state")
+            if online is None and dry_run and preserve_state and hasattr(self.policy, "snapshot_state")
             else None
         )
 
         # update [dof, odo, FK, con]
         self.env.update()
+        if online is not None and not dry_run:
+            self.safety_check()
+            if self.should_stop():
+                return
 
         # get proprioception
         env_data = self.env.get_data()
@@ -275,6 +368,9 @@ class RlPipeline(Pipeline):
         # get control command
         ctrl_data = self.ctrl_manager.get_ctrl_data(env_data)
         commands = ctrl_data.get("COMMANDS", [])
+        if "[SHUTDOWN]" in commands:
+            self.request_stop()
+            return
         if dry_run and bool(getattr(self.policy, "freeze_phase_during_dry_run", False)):
             commands = list(commands) + ["[UNILAB_FREEZE_PHASE]"]
             ctrl_data["COMMANDS"] = commands
@@ -288,8 +384,11 @@ class RlPipeline(Pipeline):
         pd_target = self.policy.get_pd_target(obs)
 
         # if not dummy_env update obs info
-        if not dry_run:
-            self.env.step(pd_target, extras.get("hand_pose", None))
+        if not dry_run and (online is None or active):
+            receipt = self.env.step(pd_target, extras.get("hand_pose", None))
+            if online is not None:
+                online.confirm_action_submission(receipt)
+                extras["fada_online"] = online.online_coordinator.status
 
         # output callback info to terminal
         self.post_step_callback(env_data, ctrl_data, extras, pd_target)
@@ -297,6 +396,19 @@ class RlPipeline(Pipeline):
             self.policy.restore_state(policy_state)
 
     def prepare(self, init_motor_angle=None):
+        self._preparing = True
+        try:
+            return self._prepare(init_motor_angle)
+        except BaseException:
+            try:
+                self.request_stop()
+            except BaseException:
+                logger.exception("Preparation safety request failed")
+            raise
+        finally:
+            self._preparing = False
+
+    def _prepare(self, init_motor_angle=None):
         # get init dof pos from policy
         if init_motor_angle is not None:
             desired_motor_angle = init_motor_angle
@@ -317,6 +429,8 @@ class RlPipeline(Pipeline):
 
         # iterate compute & update joint angle
         for t in range(traj_len):
+            if self.should_stop():
+                break
             t0 = time.perf_counter()
 
             # get current joint angle from motor
@@ -337,6 +451,8 @@ class RlPipeline(Pipeline):
             # forward propagation but abandon action
             # fill in history buffer, warm up network
             self.step(dry_run=True)
+            if self.should_stop():
+                break
 
             t3 = time.perf_counter()
 

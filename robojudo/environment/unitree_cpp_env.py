@@ -18,8 +18,21 @@ logger = logging.getLogger(__name__)
 class UnitreeCppEnv(Environment):
     cfg_env: UnitreeEnvCfg
 
+    @staticmethod
+    def validate_online_config(cfg_env):
+        if (cfg_env.is_sim or not cfg_env.act or cfg_env.unitree.robot != "g1"
+                or cfg_env.unitree.control_mode != "position"
+                or not cfg_env.unitree.enable_torso_imu):
+            raise ValueError("online FADA requires active G1 position control and torso IMU")
+        if int(getattr(RobotState, "sensor_evidence_version", 0)) != 1:
+            raise ValueError("online FADA requires rebuilt sensor-evidence v1 native bindings")
+
     def __init__(self, cfg_env: UnitreeEnvCfg, device="cpu"):
+        self._sensor_evidence_version = int(getattr(RobotState, "sensor_evidence_version", 0))
+        self._sensor_read_started_ns: int | None = None
         self.enabled: bool = cfg_env.act
+        self._shutdown_attempted = False
+        self._shutdown_error = None
         super().__init__(cfg_env=cfg_env, device=device)
         self.RemoteControllerHandler = None
 
@@ -57,12 +70,16 @@ class UnitreeCppEnv(Environment):
 
         self.unitree = UnitreeController(cfg_unitree_dict)
 
-        # born place alignment extra for h1 torso
-        if self.robot == "h1":
-            self.torso_align = TransformAlignment()
-
-        # time.sleep(1)  # wait for unitree init
-        self.self_check()
+        try:
+            if self.robot == "h1":
+                self.torso_align = TransformAlignment()
+            self.self_check()
+        except BaseException:
+            try:
+                self.shutdown()
+            except BaseException:
+                logger.exception("Native environment initialization safety request failed")
+            raise
 
     def self_check(self):
         for _ in range(30):
@@ -95,6 +112,7 @@ class UnitreeCppEnv(Environment):
 
     def update(self):
         # robot state
+        self._sensor_read_started_ns = time.monotonic_ns()
         self.robot_state = self.unitree.get_robot_state()
         if self._dof_idx is None:
             self._dof_pos = np.array(self.robot_state.motor_state.q, dtype=np.float32)
@@ -156,13 +174,23 @@ class UnitreeCppEnv(Environment):
 
     def get_data(self):
         env_data = super().get_data()
+        env_data["sensor_tick"] = int(self.robot_state.tick)
+        env_data["sensor_read_started_ns"] = self._sensor_read_started_ns
+        if self._sensor_evidence_version == 1:
+            env_data["torso_imu_sequence"] = self.robot_state.torso_imu_sequence
+            env_data["lowstate_age_s"] = self.robot_state.lowstate_age_s
+            env_data["torso_imu_age_s"] = self.robot_state.torso_imu_age_s
+        else:
+            env_data["torso_imu_sequence"] = None
+            env_data["lowstate_age_s"] = None
+            env_data["torso_imu_age_s"] = None
         if self._enable_torso_imu:
             torso_imu_state = getattr(self.robot_state, "torso_imu_state", None)
             if torso_imu_state is not None:
                 env_data["torso_imu_state"] = torso_imu_state
         return env_data
 
-    def step(self, pd_target, hand_pose=None):
+    def step(self, pd_target, hand_pose=None) -> int | None:
         assert len(pd_target) == self.num_dofs, "pd_target len should be num_dofs of env"
 
         # limits = self.position_limits
@@ -174,8 +202,10 @@ class UnitreeCppEnv(Environment):
 
         # positions = pd_target_clipped
         positions = pd_target
+        submitted_ns = None
         if self.enabled:
             self.unitree.step(positions.tolist())
+            submitted_ns = time.monotonic_ns()
 
         if hand_pose is not None:
             assert type(hand_pose) is np.ndarray, "hand_pose should be a numpy array"
@@ -187,11 +217,20 @@ class UnitreeCppEnv(Environment):
 
             if self.enabled:
                 self.unitree.step_hands(hand_pose[0], hand_pose[1])
+        return submitted_ns
 
     def shutdown(self):
-        # self.set_damping_mode()
         self.enabled = False
-        self.unitree.shutdown()
+        if self._shutdown_attempted:
+            if self._shutdown_error is not None:
+                raise self._shutdown_error
+            return
+        self._shutdown_attempted = True
+        try:
+            self.unitree.shutdown()
+        except BaseException as error:
+            self._shutdown_error = error
+            raise
 
     def set_gains(self, stiffness, damping):
         if not hasattr(self, "unitree"):  # TODO

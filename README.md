@@ -282,15 +282,395 @@ Then start the pipeline on the real robot:
 python scripts/run_pipeline.py -c g1_real
 ```
 
-To run the source v022 FADA Planner-IDM checkpoint on the real G1, configure
-the network interface in `g1_real_fada_planner_idm`, then use:
+The existing FADA frozen-inference profile keeps its original ONNX default.
+After configuring its network interface and deployment prerequisites, use:
 
 ```bash
-python scripts/run_pipeline.py -c g1_real_fada_planner_idm
+uv run --active --no-sync python scripts/run_pipeline.py -c g1_real_fada_planner_idm
 ```
 
-This entry loads the bundled source Planner-IDM checkpoint. Adapted/LoRA
-checkpoints are not supported by this entry.
+This is the frozen-inference FADA entry (`online_adaptation.method="none"`).
+Set `G1FADAPlannerIDMPolicyCfg.checkpoint_path` to select an explicit checkpoint;
+otherwise the existing assets path and filename remain unchanged. There is no
+automatic fallback to another file. Paired source PT and inference ONNX files
+are supported; separate adapted/LoRA checkpoint formats are not loaded here.
+
+#### Streaming adaptation runtime (migration step 1/6)
+
+The standalone training runtime supports `fada` (legacy streaming FADA) and
+`expert_difference` (frozen-base trajectory difference). Both initialize only
+IDM Q/V LoRA as trainable; the Planner and original IDM weights stay frozen.
+`expert_difference` additionally holds an independent frozen base IDM, copied
+before LoRA injection. The initial zero-delta adapters preserve the source
+policy's outputs.
+
+For SDK-free module use, with a verified paired PyTorch checkpoint and the
+repository's existing Python requirements available (SDK-free is not
+dependency-free):
+
+```python
+from robojudo.config.g1.policy.g1_fada_policy_cfg import (
+    FADAOnlineAdaptationCfg, G1FADAPlannerIDMPolicyCfg,
+)
+from robojudo.policy.fada.online_runtime import prepare_fada_trainable_runtime
+
+cfg = G1FADAPlannerIDMPolicyCfg(
+    checkpoint_path="/absolute/path/to/planner_idm.pt",
+    online_adaptation=FADAOnlineAdaptationCfg(method="expert_difference"),
+)
+runtime = prepare_fada_trainable_runtime(cfg, device="cpu")
+```
+
+`runtime.infer_with_snapshot(observation_history, action_history, command)`
+returns owned, graph-free histories, nominal future and first action from the
+same forward pass. Histories are `(1,H,66)` / `(1,H,29)`; command is `(1,3)`;
+the future is `(1,K,66)` and action `(1,29)`. H/K must match the checkpoint.
+Learners can call `runtime.policy.idm` with autograd enabled; ordinary inference
+remains under `no_grad`. Metadata such as hardware tick, dispatch evidence and
+policy version stays outside the 66-D model input.
+
+The runtime, collection, objective and background APIs are connected to the
+single-policy `RlPipeline` FADA adapter. Online requests require an explicit
+paired PT checkpoint and the native-evidence/actuation conditions below;
+unsupported requests fail rather than silently running frozen inference.
+FADA models are constructed once before environment initialization and reused
+by the wrapper, so missing or incompatible weights also fail before hardware
+initialization. Other policies keep their existing initialization order.
+
+Do not infer robot readiness or real-time performance from this module API.
+The minimal migrated LoRA/data components retain TTT's Apache-2.0 license in
+`robojudo/policy/fada/LICENSE-TTT`; this does not replace the repository license.
+
+#### Causal collection modules (step 2; native verification pending)
+
+`fada.online_collector` provides `FADALegacyTrajectoryCollector` and
+`FADAExpertTrajectoryCollector`. Both require the checkpoint architecture and
+an explicit positive `max_sensor_age_s`; the expert collector additionally takes
+`window_size` (default 10). The age budget must be chosen for the deployment,
+not inferred from the offline examples.
+
+Call `observe(projected_state, command, evidence)` before computing/sending the
+current action. It closes the previous issued action with this successor
+observation. Call `record_action(snapshot, evidence)` only with a confirmed
+policy submission, including its monotonic completion time. `FADACollectionResult`
+distinguishes acceptance, a completed sample, and a rejection reason.
+These interfaces are not yet wired into the robot's control loop.
+
+Evidence carries hardware tick, torso IMU receive sequence/ages, the monotonic
+read-start/submission times, episode/control step and policy version, outside
+the network input. Missing, repeated, stale, reordered or skipped frames break
+incomplete trajectories rather than compressing time. Tick ordering supports
+normal uint32 wraparound. Ages must also prove receipt after the prior
+submission, using the read-start bracket; no absolute C++/Python clock origins
+are subtracted. Local receipt ordering is not proof of hardware actuation or
+synchronization between DDS topics.
+
+Legacy windows require H+K-1 closed transitions (35 for H=30/K=6), and emit as
+soon as complete; there is no new ten-sample admission rule. Only the future
+must keep a constant command, so older commands may remain in the history.
+The expert collector retains each actual query until K successor states
+complete its pair. `get_window()` reads mature pairs; `acknowledge()` consumes
+only explicitly confirmed `(episode_id, control_step)` identities, preserving
+later arrivals and in-flight queries. `reset()` clears incomplete data in both
+collectors and mature expert pairs. Legacy mature accumulation belongs to
+`FADALegacyUpdater`, not a second collector cache.
+
+The native change attaches receive metadata to the same buffered IMU sample;
+copying that sample into a LowState snapshot does not refresh its timestamp.
+Rebuild `packages/unitree_cpp` against Unitree SDK2, CycloneDDS and pybind11.
+The rebuilt `RobotState.sensor_evidence_version` is 1, and `UnitreeCppEnv`
+publishes tick, ages, receive sequence and read-start time. Older bindings
+produce explicit missing metadata and cannot admit learning samples; frozen
+inference remains available. The SDK/DDS build prerequisites were not found
+at the local default paths: native build/import and receiver validation remain
+pending. SDK-free Python checks do not validate the native extension or actual
+DDS traffic. No control/PD protocol was changed and no controller is launched
+by these collection modules.
+
+#### Standalone optimization objectives (step 3)
+
+`robojudo.policy.fada.online_updater` consumes an already prepared trainable
+runtime. It never reloads the checkpoint, reinjects LoRA or copies another
+Planner/base. Create the matching updater once before learning and retain it
+across ordinary episode resets.
+
+- `FADALegacyUpdater(runtime)` accepts `FADACausalWindow` via `append_window()`.
+  `compute_loss()` uses realized futures, first predicted/issued actions,
+  action-coordinate mean MSE and normalized exponential weights
+  (`lambda_forget=0.99`). Forward order and train-mode dropout follow the legacy
+  donor. `update()` returns `None` for an empty buffer; any non-empty partial
+  batch can update, and only success clears the mature buffer. Failures retain
+  it but do not promise optimizer rollback.
+- `build_expert_samples(runtime.base_idm, mature_pairs, gamma=0.05)` translates
+  matched nominal/realized futures through the frozen base and fixes each
+  target as the issued snapshot plus the nominal-minus-realized first-action
+  difference. `FADAExpertUpdater(runtime, sigma=1e-4)` regresses these fixed
+  samples under nominal futures in eval mode with autograd enabled. Its loss
+  averages half the squared action norm over samples and adds an L2 pull toward
+  the actual deployment-start LoRA parameters, not zero. `compute_loss(samples)`
+  returns total/regression/anchor; `update(samples)` returns their scalar stats.
+  It neither retains samples nor acknowledges the collector.
+
+Both use LoRA-only Adam (`lr=1e-4`, `weight_decay=0`, `max_grad_norm=1` or `None`
+to disable clipping), take one step per update, and restore the IDM's prior
+training modes. Their parameters are also exposed by `FADAOnlineAdaptationCfg`.
+The official single-policy FADA path uses the coordinator below for scheduling
+and exact sample acknowledgement. Do not impose the expert ten-sample gate on
+the legacy updater.
+
+The focused SDK-free proof exercises real small Planner-IDM networks, compares
+both losses and LoRA gradients to independent donor expressions, checks static
+labels/deployment anchoring and unchanged Planner/base weights, and runs both
+public update-to-inference paths. It is not native-extension, real-time,
+hardware-safety or load-adaptation evidence.
+
+#### Background coordination and complete publication (step 4)
+
+`fada.online_controller.FADAOnlineCoordinator(runtime, online_config)` composes
+the existing collectors and objectives. The config method and LoRA settings
+must match the prepared runtime, and `max_sensor_age_s` must be explicitly set
+to a positive deployment budget. It is intentionally not guessed by this API.
+Call `start()` only in a guarded main/lifecycle path, before hardware startup;
+do not spawn processes from configuration imports.
+
+A single spawned learner receives an exact, owned initialization snapshot,
+including the actual initial adapters and frozen base. It retains its optimizer
+and anchor across jobs/resets, never runs a Planner forward, and never shares
+mutable model storage with inference. Defaults are CPU/one learner compute
+thread, one outstanding job, and startup/update/close budgets of 30/5/1 seconds.
+Sample/weight IPC uses owned bytes, not shared torch tensors or on-disk files.
+A background transport thread receives complete result messages; control-side
+`poll()` reads only an in-process bounded inbox, so even a truncated child reply
+does not make it wait for the remaining pipe frame. The monotone stop flag has
+no process-owned lock.
+
+The single control writer uses this order:
+
+1. `observe(state, command, evidence)` closes the preceding physical submission.
+2. `poll()` receives validated completions; `apply_pending_at_step_boundary()`
+   prepares and applies the entire adapter set before the next forward.
+3. `try_submit()` admits at most one eligible batch without waiting for learning.
+4. Infer with `runtime.infer_with_snapshot`, perform the real submission, then
+   `record_action(snapshot, evidence)` with the applied `policy_version`.
+
+Legacy scheduling requires a non-empty mature batch at a ten-step interval,
+not a full expert window. Its ordered transport outbox has capacity 40 by
+default; saturation is a terminal error, never silent loss or unbounded replay.
+Expert scheduling retains the 40-step warmup, ten-sample window and ten-step
+interval. While busy it keeps the collector's latest bounded window; a submitted
+batch is held independently until completion. Success confirms only its exact
+sample IDs, preserving later arrivals. Learning completion and actor publication
+are separate: `status` reports completed/applied versions, in-flight job,
+pending counts, update statistics and latency. A result cannot admit another
+job until its version is applied.
+
+`reset()` requires a new increasing episode identity, clears incomplete data
+and unsubmitted expert samples, but retains legacy mature data and accepted
+complete jobs. A pre-reset job may finish and its learning is retained; it can
+only acknowledge its original IDs and publish at a subsequent active control
+boundary. No new job/publication is admitted during inactive preparation.
+Ordinary reset does not reset Adam, the frozen base or deployment anchor.
+
+`request_stop()` invalidates pending publication without waiting for learning.
+After actuator safety is handled, call `close()` outside the control loop;
+bounded join escalates to termination/kill and checks process/reader exit.
+Unexpected exit, timeout, malformed/non-finite weights and outbox saturation
+are explicit terminal failures, not retries or inference-only fallbacks.
+`wait_for_message()` is an offline/lifecycle helper and must not be called from
+the control path. Forced-kill fault injection can emit Python resource-tracker
+semaphore-cleanup warnings; verified child/reader exit does not claim that
+arbitrary SIGKILL provides graceful cleanup of every IPC resource.
+
+SDK-free smoke exercised both methods through actual spawn/update/publication,
+two sequential Adam updates across reset, busy inference, precise late
+acknowledgement, malformed and partial replies, learner errors/timeouts,
+bounded backlog and shutdown. This does not establish a 20ms device deadline,
+DDS correctness, native-extension compatibility or successful load adaptation.
+The official Python adapter/pipeline lifecycle is connected as described below.
+
+#### Official control lifecycle (step 5; native acceptance still pending)
+
+`online_adaptation.method` selects `none`, `fada` or `expert_difference`.
+The default remains frozen inference with the original PT/ONNX selection.
+Online modes require an explicit paired PT, positive `max_sensor_age_s`, the
+single-policy `UnitreeCppEnv` G1 position-control path, `act=true`, enabled torso
+IMU and rebuilt `sensor_evidence_version=1` bindings. The learner READY handshake
+and configuration checks run before the hardware controller is constructed.
+Missing capability is an error, not a baseline fallback. Multi-policy online
+adaptation is not enabled by this change.
+
+Online queries use `FADAPlaybackController.prepare_query` and one runtime
+snapshot forward; they do not commit their predicted action immediately.
+After `UnitreeCppEnv.step` returns a body-submission monotonic timestamp,
+`confirm_action_submission` commits the raw policy-order action to history and
+the causal collector. The outgoing command retains the existing default pose,
+execution scale and joint mapping. Absolute PD targets and scaled commands are
+never substituted for raw learning labels. Disabled or failed submissions do
+not confirm samples.
+
+The timestamp proves only that the local native submission returned. Native
+`step` updates the command buffer and invokes its writer, but this is not a DDS
+delivery acknowledgement or proof of motor actuation.
+
+Self-check, prepare and dry-run may warm the model but never collect, submit a
+new update or publish weights. Their inferred commands are not recorded as
+executed history. The first active step starts a new execution history/count;
+initial padding is not measured experience. The original 1000-step preparation
+and reset at step 900 remain. Ordinary resets retain the learner/Adam/base/anchor
+and learned weights while invalidating unconfirmed queries and incomplete
+trajectories; active physical history cannot be rewound using snapshot restore.
+
+`RlPipeline.should_stop/request_stop/close` and the entry's `try/finally` cover
+normal stop, emergency commands, falls, learner errors, submission errors and
+interrupts. Existing actuator damping shutdown is requested before waiting to
+reap learning resources. Shutdown disables further policy writes and is
+idempotent; partial construction also cleans up resources already obtained.
+Cleanup failures remain visible and do not replace the primary exception.
+No native gain values or controller protocol were changed, and this does not
+claim that every native sending thread has been stopped.
+
+The SDK-free integration exercised real small networks, adapters, wrappers,
+pipeline preparation and learner processes with a test-only SDK/sensor/actuator
+boundary. It checked all three modes, receipt-only history commits, reversed
+joint ordering and non-unit execution scaling, successful update/publication,
+reset retention, rejected submissions, startup failure and interrupted main.
+No actual SDK2/DDS controller was created. Native build/receiver acceptance,
+target-device timing, physical stop delivery and adaptation quality remain
+unverified. The comparison entry/configuration delivery is described below.
+
+#### Comparison startup profiles (step 6)
+
+These profiles use the same existing paired checkpoint,
+`assets/models/g1/fada/planner_idm_v022/planner_idm.pt`, through the shared
+`_fada_comparison_policy` in `robojudo/config/g1/g1_cfg.py`:
+
+| Registered configuration | Method | Learner |
+|---|---|---|
+| `g1_real_fada_baseline` | `none` | None |
+| `g1_real_fada_online` | `fada` | Legacy realized-trajectory regression |
+| `g1_real_fada_expert_online` | `expert_difference` | Frozen-base trajectory-difference targets |
+
+The original `g1_real_fada_planner_idm` profile still selects
+`g1_hang_book_real.onnx`; it is not the shared-PT comparison baseline. No
+checkpoint is copied, scanned for or silently substituted. To use a different
+verified paired PT in all three comparison profiles, set `checkpoint_path` in
+the shared helper. PT compatibility does not establish provenance equivalence
+with the original ONNX.
+
+**Prerequisites, not an authorization to run hardware:**
+
+- Use an already installed RoboJudo environment with its declared dependencies,
+  matching PyTorch and rebuilt `unitree_cpp` evidence-v1 binding. The commands
+  below assume that environment is activated (`VIRTUAL_ENV` is set) and use
+  `--active --no-sync`; they do not install dependencies or create a new setup.
+  The local migration smoke used the existing TTT uv environment plus cached
+  dependencies, not a validated standalone RoboJudo deployment environment.
+- Set `env.unitree.net_if` in the shared parent
+  `g1_real_fada_planner_idm` for the deployment host. The comparison profiles
+  inherit its G1 position-control/torso-IMU/safety configuration.
+- In `_fada_comparison_policy`, replace `max_sensor_age_s=None` with an explicit
+  positive **local receive-age** budget established for that deployment. Online
+  profiles intentionally refuse to start without it, before constructing the
+  hardware environment. This budget is not a robot-clock synchronization or
+  physical actuation-latency measurement. Do not copy the smoke fixture's 0.01s
+  value as an accepted hardware threshold.
+- Native build/import and actual DDS/IMU reception, device timing and physical
+  stop response remain unverified. Do not treat the commands as approval to
+  stand, walk or add a load.
+
+From the repository root, choose **one** profile after satisfying those
+prerequisites and obtaining authorization for the actual robot run:
+
+Frozen shared-PT reference:
+
+```bash
+uv run --active --no-sync python \
+  scripts/run_pipeline.py \
+  -c g1_real_fada_baseline
+```
+
+Legacy streaming FADA:
+
+```bash
+uv run --active --no-sync python \
+  scripts/run_pipeline.py \
+  -c g1_real_fada_online
+```
+
+Frozen-base trajectory-difference streaming:
+
+```bash
+uv run --active --no-sync python \
+  scripts/run_pipeline.py \
+  -c g1_real_fada_expert_online
+```
+
+The entry only accepts `-c/--config`; dotted Hydra overrides or a
+`--fada-method` argument are not supported. These remain keyboard profiles.
+Ctrl-C exits through the common safety-request/cleanup path; the generic
+Unitree-controller `A` mapping below is not selected by these profiles.
+Independently verify the physical emergency-stop procedure before any live use.
+
+**Reading progress and outputs:** online submitted steps carry
+`extras["fada_online"]`: `control_step` is an actual policy-step index,
+`learner_version` is the completed learner version, and `policy_version` is the
+version actually installed for subsequent inference. Completion is not
+publication. `pending_samples`, `inflight_samples`, `state`, `failure`,
+`last_update` and `last_latency_s` expose collection/update state; a zero
+version before sufficient valid frames is not by itself an error.
+
+These fields are not automatically printed as a terminal progress bar. The
+existing `debug.log_obs=True` recorder can write them under each record's
+`extras.fada_online` in `logs/log_<timestamp>_<config>/log.msgpack`, with
+`config.json` alongside it; it is off by default and can add I/O/latency.
+It is debug telemetry, not a guaranteed lossless stop/audit log.
+Online weights/Adam state remain in memory: this path does not automatically
+export an adapted checkpoint or resume an interrupted learner.
+
+**Evidence and native gap:** the single targeted registered-entry smoke loaded
+all three names through the real ConfigManager and `-c` parser, ran real small
+networks/optimization through main/prepare/control/finally, kept frozen weights
+unchanged, applied learner version 1 in both online modes and reaped their
+processes/receiver threads. It substituted only the test hardware boundary and
+offline settings (temporary paired PT, known synthetic sensor budget, disabled
+debug/kinematics and accelerated scheduling). It was not a production-checkpoint
+run, a physical simulation, a 50Hz timing proof or a real robot run.
+
+Step 2 still requires an actual build on a separately authorized host with
+Unitree SDK2/CycloneDDS/pybind11 (see `packages/unitree_cpp/CMakeLists.txt` and
+the existing SDK setup guide), then loading that newly built extension and
+checking version/unknown metadata without constructing `UnitreeController`.
+Such an import check alone cannot prove the receiver-age calculations or
+real DDS packet freshness. No build, installation or hardware connection was
+performed by the step-6 smoke. The earlier forced-kill semaphore-cleanup warning
+also remains an explicitly unresolved boundary; graceful smoke completion does
+not prove all IPC paths are leak-free.
+
+#### Offline receive-age calculation (step-2 follow-up)
+
+`packages/unitree_cpp/src/sensor_evidence.hpp` now owns the pure C++17
+`compute_receive_ages` calculation used by `UnitreeController::get_robot_state`.
+It uses the existing steady-clock receipt timestamps, returns seconds, and
+leaves an unreceived torso sample unknown. A copied torso sample retains its
+original timestamp; a new LowState cannot reset that old torso sample's age.
+The helper does not allocate or add an SDK/controller construction path.
+
+`packages/unitree_cpp/tests/test_sensor_evidence.cpp` compiles independently of
+SDK/DDS and exercises units, age growth, missing torso data, new LowState with
+old torso data and valid zero age. The focused local smoke compiled and ran
+this actual production helper with C++17, then passed its emitted ages to both
+real Python causal collectors: fresh data was accepted and stale/missing data
+rejected. Its temporary executable was removed; no previous suites were rerun.
+
+This is calculation/consumer evidence, not a build of the full SDK extension.
+The uv environment used for this check could not find `pybind11`,
+`scikit_build_core` or `unitree_cpp`; nothing was installed. The actual
+`get_robot_state` SDK path, real pybind field conversion and
+`UnitreeCppEnv.get_data` against the newly built extension remain pending.
+Constructing a controller is not an offline shortcut: its constructor initializes
+DDS, releases the motion-control service and starts command-writer threads,
+regardless of the Python environment's `act` flag.
+
 
 Your robot should move into default pos. 
 **During the preparation, put your robot on the ground.**

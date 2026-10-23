@@ -7,6 +7,7 @@ if platform.machine().startswith("aarch64"):
 
 import argparse
 import logging
+import sys
 import time
 
 import robojudo.pipeline
@@ -47,40 +48,44 @@ def main():
     pipeline_class: type[RlPipeline] = getattr(robojudo.pipeline, pipeline_type)
     logger.info(f"Using pipeline: {pipeline_type} -> {pipeline_class}")
 
-    # instantiate choosen pipeline class
     pipeline = pipeline_class(cfg=cfg)
-
-    print("\n")
-    print(f"cfg.device: {cfg.device}")
-    print("\n")
-
-    # if mujoco = False
-    if not cfg.env.is_sim:
-        pipeline.prepare()
-    
-    # temp = 1
-    # assert temp == 2
-
-    # continue execute step
-    while True:
-        time_start = time.time()
-        pipeline.step()
-        time_end = time.time()
-        time_diff = time_end - time_start
-
-        # keep the pipeline running at the desired frequency
-        if not cfg.run_fullspeed:
-            time_diff = pipeline.dt - time_diff
-            if time_diff > 0:
-                time.sleep(time_diff)
-            else:
-                if not cfg.env.is_sim:
-                    logger.error(f"Warning: frame drop -> {time_diff}")
-                    if time_diff < -0.2:
+    should_stop = getattr(pipeline, "should_stop", lambda: False)
+    request_stop = getattr(pipeline, "request_stop", None)
+    close = getattr(pipeline, "close", None)
+    try:
+        print(f"\ncfg.device: {cfg.device}\n")
+        if not cfg.env.is_sim:
+            pipeline.prepare()
+        while not should_stop():
+            time_start = time.time()
+            pipeline.step()
+            time_diff = time.time() - time_start
+            if not cfg.run_fullspeed:
+                remaining = pipeline.dt - time_diff
+                if remaining > 0:
+                    time.sleep(remaining)
+                elif not cfg.env.is_sim:
+                    logger.error(f"Warning: frame drop -> {remaining}")
+                    if remaining < -0.2:
                         logger.critical("Exiting due to excessive frame drop")
-                        pipeline.env.shutdown()
-                        time.sleep(10)
+                        if request_stop is not None:
+                            request_stop()
+                        else:
+                            pipeline.env.shutdown()
                         break
+    except KeyboardInterrupt:
+        logger.info("Interrupted; requesting safe shutdown")
+    finally:
+        has_primary_error = sys.exc_info()[0] is not None
+        try:
+            if close is not None:
+                close()
+            else:
+                pipeline.env.shutdown()
+        except BaseException:
+            if not has_primary_error:
+                raise
+            logger.exception("Shutdown failed while handling the primary exception")
 
 
 if __name__ == "__main__":

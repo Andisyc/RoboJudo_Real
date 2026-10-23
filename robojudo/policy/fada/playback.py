@@ -53,7 +53,7 @@ class FADAPlaybackController:
         self._action_history = None if action_history is None else action_history.detach().clone()
 
     @torch.no_grad()
-    def act(self, observation: Any, command: Any) -> torch.Tensor:
+    def prepare_query(self, observation: Any, command: Any) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raw = torch.as_tensor(observation, dtype=torch.float32, device=self.device)
         if raw.ndim == 1:
             raw = raw.unsqueeze(0)
@@ -72,10 +72,13 @@ class FADAPlaybackController:
         self._advance_observation_history(obs)
         assert self._observation_history is not None
         assert self._action_history is not None
-        action = self.runtime.infer(
-            self._observation_history, self._action_history, cmd
-        ).detach()
-        expected_action_shape = (obs.shape[0], self.action_dim)
+        return self._observation_history, self._action_history, cmd
+
+    @torch.no_grad()
+    def commit_action(self, action: torch.Tensor) -> None:
+        if self._action_history is None:
+            raise RuntimeError("FADA action commit requires a prepared query")
+        expected_action_shape = (self._action_history.shape[0], self.action_dim)
         if tuple(action.shape) != expected_action_shape or not bool(torch.isfinite(action).all()):
             raise ValueError(
                 "FADA playback action must be finite with shape "
@@ -84,6 +87,12 @@ class FADAPlaybackController:
         self._action_history = torch.cat(
             (self._action_history[:, 1:], action.unsqueeze(1)), dim=1
         )
+
+    @torch.no_grad()
+    def act(self, observation: Any, command: Any) -> torch.Tensor:
+        histories = self.prepare_query(observation, command)
+        action = self.runtime.infer(*histories).detach()
+        self.commit_action(action)
         return action
 
     def _advance_observation_history(self, obs: torch.Tensor) -> None:

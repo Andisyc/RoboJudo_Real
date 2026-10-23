@@ -51,7 +51,10 @@ from .policy.g1_unilab_policy_cfg import (  # noqa: F401
     G1UniLabDistillPolicyCfg,
     G1UniLabPolicyCfg,
 )
-from .policy.g1_fada_policy_cfg import G1FADAPlannerIDMPolicyCfg  # noqa: F401
+from .policy.g1_fada_policy_cfg import (  # noqa: F401
+    FADAOnlineAdaptationCfg,
+    G1FADAPlannerIDMPolicyCfg,
+)
 
 
 UNILAB_G1_STAND_ROOT_QPOS: list[float] = [0.0, 0.0, 0.754, 1.0, 0.0, 0.0, 0.0]
@@ -173,6 +176,38 @@ class g1_real_fada_planner_idm(g1_fada_planner_idm):  # Sim2Real
     )
     ctrl: List[KeyboardCtrlCfg] = [KeyboardCtrlCfg()]
     do_safety_check: bool = True
+
+
+def _fada_comparison_policy(method: str) -> G1FADAPlannerIDMPolicyCfg:
+    return G1FADAPlannerIDMPolicyCfg(
+        checkpoint_filename="planner_idm.pt",
+        online_adaptation=FADAOnlineAdaptationCfg(
+            method=method,
+            # Set a measured deployment receive-age budget before online use.
+            max_sensor_age_s=None,
+        ),
+    )
+
+
+@cfg_registry.register
+class g1_real_fada_baseline(g1_real_fada_planner_idm):
+    """Frozen paired-PT reference for the streaming comparisons."""
+
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("none")
+
+
+@cfg_registry.register
+class g1_real_fada_online(g1_real_fada_planner_idm):
+    """Legacy streaming FADA using the same paired PT as the reference."""
+
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("fada")
+
+
+@cfg_registry.register
+class g1_real_fada_expert_online(g1_real_fada_planner_idm):
+    """Frozen-base trajectory-difference streaming adaptation."""
+
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("expert_difference")
 
 
 @cfg_registry.register

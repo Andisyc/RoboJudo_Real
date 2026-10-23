@@ -574,6 +574,9 @@ These profiles use the same existing paired checkpoint,
 | `g1_real_fada_online` | `fada` | Legacy realized-trajectory regression |
 | `g1_real_fada_expert_online` | `expert_difference` | Frozen-base trajectory-difference targets |
 
+All three comparison profiles disable gait phase and fix its observation to
+`[0.0, 0.0]` in the shared helper, matching the phase-neutral v022 training setup.
+
 The original `g1_real_fada_planner_idm` profile still selects
 `g1_hang_book_real.onnx`; it is not the shared-PT comparison baseline. No
 checkpoint is copied, scanned for or silently substituted. To use a different

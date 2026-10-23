@@ -181,6 +181,9 @@ class g1_real_fada_planner_idm(g1_fada_planner_idm):  # Sim2Real
 def _fada_comparison_policy(method: str) -> G1FADAPlannerIDMPolicyCfg:
     return G1FADAPlannerIDMPolicyCfg(
         checkpoint_filename="planner_idm.pt",
+        # The paired v022 checkpoint was trained with zero phase observations.
+        gait_phase_enabled=False,
+        fixed_gait_phase=[0.0, 0.0],
         online_adaptation=FADAOnlineAdaptationCfg(
             method=method,
             # Initial receive-age limit: one 50 Hz control period, not a measured guarantee.

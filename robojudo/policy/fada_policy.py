@@ -36,6 +36,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         self.online_coordinator = None
         self._control_active = None
         self._control_step = 0
+        self._adaptation_started = False
+        self._pending_collection = False
         self._pending_snapshot = None
         self._pending_evidence = None
         self._pending_sensor = None
@@ -161,6 +163,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         self._pending_evidence = None
         self._pending_sensor = None
         self._control_step = 0
+        self._adaptation_started = False
+        self._pending_collection = False
         if self.online_coordinator is not None:
             self.online_coordinator.reset()
             self._control_active = False
@@ -184,6 +188,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             self._pending_snapshot = None
             self._pending_evidence = None
             self._control_step = 0
+            self._adaptation_started = False
+            self._pending_collection = False
         self._control_active = bool(active)
 
     def confirm_action_submission(self, submitted_ns: int | None):
@@ -201,15 +207,18 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         )
         self.playback_controller.commit_action(snapshot.action_snapshot)
         self.last_action = snapshot.action_snapshot.squeeze(0).cpu().numpy().copy()
-        self.online_coordinator.record_action(snapshot, evidence)
+        if self._pending_collection:
+            self.online_coordinator.record_action(snapshot, evidence)
         self._pending_snapshot = None
         self._pending_evidence = None
+        self._pending_collection = False
         self._control_step += 1
 
     def request_stop(self):
         self._stopping = True
         self._pending_snapshot = None
         self._pending_evidence = None
+        self._pending_collection = False
         if self.online_coordinator is not None:
             self.online_coordinator.request_stop()
 
@@ -387,18 +396,28 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             histories = self.playback_controller.prepare_query(candidate, self._pending_command)
             if self._control_active:
                 coordinator = self.online_coordinator
+                if not self._adaptation_started and np.any(self._pending_command != 0.0):
+                    self._adaptation_started = True
+                    logger.info(
+                        "FADA online collection triggered at control_step=%d command=%s",
+                        self._control_step, self._pending_command.tolist(),
+                    )
                 evidence = FADAControlEvidence(
                     episode_id=coordinator.episode_id, control_step=self._control_step,
                     policy_version=coordinator.policy_version,
                     policy_control_active=True, action_dispatched=False,
                     **self._pending_sensor,
                 )
-                coordinator.observe(histories[0][:, -1], histories[2], evidence)
-                coordinator.apply_pending_at_step_boundary()
-                coordinator.try_submit()
+                if self._adaptation_started:
+                    coordinator.observe(histories[0][:, -1], histories[2], evidence)
+                    coordinator.apply_pending_at_step_boundary()
+                    coordinator.try_submit()
+                else:
+                    coordinator.poll()
                 snapshot = coordinator.runtime.infer_with_snapshot(*histories)
                 self._pending_snapshot = snapshot
                 self._pending_evidence = replace(evidence, policy_version=coordinator.policy_version)
+                self._pending_collection = self._adaptation_started
                 action_tensor = snapshot.action_snapshot
             else:
                 action_tensor = self._runtime["runner"].infer(*histories)

@@ -1201,17 +1201,23 @@ def _fada_deployment_harness():
                     raise RuntimeError("injected controller construction failure")
                 self.commands = []
                 self.interrupt = False
+                self.keyboard_events = []
 
             def get_ctrl_data(self, env_data):
                 if self.interrupt:
                     raise KeyboardInterrupt
-                return Box(COMMANDS=list(self.commands))
+                events, self.keyboard_events = self.keyboard_events, []
+                return Box(COMMANDS=list(self.commands), KeyboardCtrl={"keyboard_event": events})
 
             def post_step_callback(self, ctrl_data):
                 pass
 
+            def press(self, name):
+                self.keyboard_events.append({"type": "keyboard", "name": name, "pressed": True})
+
             def reset(self):
                 self.commands.clear()
+                self.keyboard_events.clear()
 
         class ObservedAdapter(FADAPlannerIDMPolicyAdapter):
             instances = []
@@ -1310,6 +1316,7 @@ class TestFADADeploymentIntegration(unittest.TestCase):
                         expected = frozen(histories, previous, torch.zeros(1, 3)).action[0].numpy()
                     np.testing.assert_allclose(adapter.last_action, expected, rtol=1e-5, atol=1e-6)
                 else:
+                    pipeline.ctrl_manager.press("w")
                     for _ in range(41):
                         pipeline.step()
                     self.assertEqual(len(sent_queries), 41)
@@ -1496,6 +1503,11 @@ class TestFADADeploymentIntegration(unittest.TestCase):
                 with self.subTest(profile=profile), _fada_deployment_harness() as h:
                     captured = []
                     case = self
+                    waiting_steps = 53
+                    completion_step = waiting_steps + 41
+                    reset_waiting_steps = 12
+                    retrigger_step = completion_step + reset_waiting_steps + 1
+                    stop_step = retrigger_step + 2
 
                     class SmokePipeline(h.Pipeline):
                         def __init__(self, **kwargs):
@@ -1517,45 +1529,108 @@ class TestFADADeploymentIntegration(unittest.TestCase):
                             self.smoke_active = True
 
                         def step(self, dry_run=False):
+                            next_step = self.smoke_steps + 1
+                            if self.smoke_active and not dry_run and method != "none":
+                                if next_step in (waiting_steps + 1, retrigger_step):
+                                    self.ctrl_manager.press("w" if next_step == waiting_steps + 1 else "s")
+                                elif next_step == retrigger_step + 1:
+                                    self.ctrl_manager.press("x")
                             super().step(dry_run=dry_run)
                             if not self.smoke_active or dry_run:
                                 return
                             self.smoke_steps += 1
                             adapter = self.policy.policy
                             coordinator = adapter.online_coordinator
-                            if coordinator is not None and self.smoke_steps == 41:
-                                case.assertEqual(coordinator.runtime.method, method)
-                                case.assertTrue(coordinator.worker.wait_for_message(10))
-                                case.assertIsNotNone(coordinator.poll())
-                                case.assertEqual(coordinator.policy_version, 0)
-                            if self.smoke_steps == 42:
-                                model = adapter._runtime["model"]
-                                if method == "none":
-                                    case.assertIsNone(coordinator)
+                            model = adapter._runtime["model"]
+                            if method == "none":
+                                case.assertIsNone(coordinator)
+                                if self.smoke_steps == 42:
                                     for name, parameter in model.named_parameters():
                                         torch.testing.assert_close(parameter, self.before_weights[name],
                                                                    rtol=0, atol=0)
-                                else:
-                                    case.assertEqual(coordinator.worker.learner_version, 1)
-                                    case.assertEqual(coordinator.policy_version, 1)
-                                    case.assertTrue(any(not torch.equal(p, self.before_weights[n])
-                                                        for n, p in fada_adapter_named_parameters(model)))
-                                    after = adapter._runtime["runner"].infer(*self.probe)
-                                    case.assertFalse(torch.equal(after, self.before_output))
-                                self.request_stop()
+                                    self.request_stop()
+                                return
+
+                            if self.smoke_steps <= waiting_steps:
+                                case.assertFalse(adapter._adaptation_started)
+                                case.assertIsNone(coordinator.status["collection_step"])
+                                case.assertIsNone(coordinator.worker.pending_job)
+                                case.assertIsNone(coordinator.collector._pending)
+                                case.assertEqual(coordinator.status["pending_samples"], 0)
+                                case.assertEqual(coordinator.worker.learner_version, 0)
+                                case.assertEqual(adapter._control_step, self.smoke_steps)
+                                torch.testing.assert_close(adapter.playback_controller._action_history[0, -1],
+                                                           torch.from_numpy(adapter.last_action))
+                                if self.smoke_steps == waiting_steps:
+                                    self.waiting_history = adapter.playback_controller._action_history.clone()
+                                    for name, parameter in fada_adapter_named_parameters(model):
+                                        torch.testing.assert_close(parameter, self.before_weights[name],
+                                                                   rtol=0, atol=0)
+                            elif self.smoke_steps == waiting_steps + 1:
+                                case.assertTrue(adapter._adaptation_started)
+                                case.assertEqual(coordinator.status["collection_start_control_step"], waiting_steps)
+                                case.assertEqual(coordinator.status["collection_step"], 0)
+                                torch.testing.assert_close(coordinator.collector._pending.snapshot.action_history,
+                                                           self.waiting_history, rtol=0, atol=0)
+                            elif self.smoke_steps < completion_step:
+                                case.assertIsNone(coordinator.worker.pending_job)
+                                case.assertEqual(coordinator.worker.learner_version, 0)
+                            elif self.smoke_steps == completion_step:
+                                case.assertEqual(coordinator.runtime.method, method)
+                                case.assertEqual(coordinator.status["collection_step"], 40)
+                                case.assertEqual(coordinator.worker.pending_job.identity.control_step,
+                                                 waiting_steps + 40)
+                                case.assertTrue(coordinator.worker.wait_for_message(10))
+                                case.assertIsNotNone(coordinator.poll())
+                                case.assertEqual(coordinator.policy_version, 0)
+                                case.assertTrue(coordinator.status["publication_pending"])
+                                self.learner_pid = coordinator.worker.process.pid
+                                generation = coordinator.generation
+                                self.reset()
+                                case.assertEqual(coordinator.generation, generation + 1)
+                                case.assertFalse(adapter._adaptation_started)
+                                case.assertIsNone(coordinator.status["collection_step"])
+                            elif self.smoke_steps < retrigger_step:
+                                case.assertFalse(adapter._adaptation_started)
+                                case.assertIsNone(coordinator.status["collection_step"])
+                                case.assertEqual(coordinator.policy_version, 0)
+                                case.assertTrue(coordinator.status["publication_pending"])
+                                case.assertEqual(coordinator.worker.process.pid, self.learner_pid)
+                                for name, parameter in fada_adapter_named_parameters(model):
+                                    torch.testing.assert_close(parameter, self.before_weights[name],
+                                                               rtol=0, atol=0)
+                            else:
+                                case.assertTrue(adapter._adaptation_started)
+                                case.assertEqual(coordinator.status["collection_start_control_step"],
+                                                 reset_waiting_steps)
+                                case.assertEqual(coordinator.status["collection_step"],
+                                                 self.smoke_steps - retrigger_step)
+                                case.assertEqual(coordinator.worker.learner_version, 1)
+                                case.assertEqual(coordinator.policy_version, 1)
+                                case.assertEqual(coordinator.worker.process.pid, self.learner_pid)
+                                case.assertIsNone(coordinator.worker.pending_job)
+                                case.assertTrue(any(not torch.equal(p, self.before_weights[n])
+                                                    for n, p in fada_adapter_named_parameters(model)))
+                                after = adapter._runtime["runner"].infer(*self.probe)
+                                case.assertFalse(torch.equal(after, self.before_output))
+                                if self.smoke_steps > retrigger_step:
+                                    np.testing.assert_array_equal(adapter._keyboard_command, np.zeros(3))
+                                if self.smoke_steps == stop_step:
+                                    self.request_stop()
 
                     with patch.object(ConfigManager, "get_cfg", offline_cfg), \
                             patch.dict(pipelines.__dict__, {"RlPipeline": SmokePipeline}), \
                             patch.object(sys, "argv", [str(path), "-c", profile]):
                         entry.main()
                     pipeline = captured[0]
-                    self.assertEqual(pipeline.smoke_steps, 42)
+                    self.assertEqual(pipeline.smoke_steps, 42 if method == "none" else stop_step)
                     self.assertTrue(pipeline.env.unitree.safe)
                     coordinator = pipeline.policy.online_coordinator
                     if coordinator is not None:
                         self.assertFalse(coordinator.worker.process.is_alive())
                         self.assertFalse(coordinator.worker._receiver.is_alive())
                     print("REGISTERED_ENTRY_SMOKE", profile, "method=" + method,
+                          "frozen_reference=passed" if coordinator is None else "velocity_and_reset_gate=passed",
                           "applied_version=" + str(0 if coordinator is None else coordinator.policy_version),
                           "safe_requested=True")
 

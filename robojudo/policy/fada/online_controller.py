@@ -48,6 +48,7 @@ class FADAOnlineCoordinator:
         self._inflight = ()
         self._publication = None
         self._step = -1
+        self._collection_start_step: int | None = None
         self._active = False
         self._accepted_frame = False
         self._last_submitted = None
@@ -78,6 +79,9 @@ class FADAOnlineCoordinator:
             "failure": self.failure or self.worker.failure,
             "episode_id": self.episode_id, "generation": self.generation,
             "control_step": self._step, "policy_version": self.policy_version,
+            "collection_start_control_step": self._collection_start_step,
+            "collection_step": (None if self._collection_start_step is None
+                                else self._step - self._collection_start_step),
             "pending_samples": pending, "inflight_samples": len(self._inflight),
             "publication_pending": self._publication is not None,
             "last_update": self.last_update,
@@ -97,6 +101,8 @@ class FADAOnlineCoordinator:
         if evidence.episode_id != self.episode_id:
             raise ValueError("episode changes require coordinator.reset")
         self.poll()
+        if self._collection_start_step is None and evidence.policy_control_active:
+            self._collection_start_step = evidence.control_step
         result = self.collector.observe(projected_state, command, evidence)
         self._step = max(self._step, evidence.control_step)
         self._active = evidence.policy_control_active
@@ -119,7 +125,10 @@ class FADAOnlineCoordinator:
     def try_submit(self):
         self._check_owner()
         if (self._stopping or not self._active or not self._accepted_frame
-                or self._step <= 0 or self._step % self.config.update_interval != 0
+                or self._collection_start_step is None):
+            return None
+        collection_step = self._step - self._collection_start_step
+        if (collection_step <= 0 or collection_step % self.config.update_interval != 0
                 or self._last_submitted == (self.episode_id, self._step)):
             return None
         self.poll()
@@ -130,7 +139,7 @@ class FADAOnlineCoordinator:
                 return None
             samples = tuple(self._outbox)
         else:
-            if self._step < self.config.warmup_steps or not self.collector.ready:
+            if collection_step < self.config.warmup_steps or not self.collector.ready:
                 return None
             samples = self.collector.get_window()
         try:
@@ -217,6 +226,7 @@ class FADAOnlineCoordinator:
         self.generation += 1
         self.collector.reset(episode_id=self.episode_id)
         self._step = -1
+        self._collection_start_step = None
         self._active = False
         self._accepted_frame = False
         # Keep outbox, accepted job, staged result and the worker's optimizer/anchor.

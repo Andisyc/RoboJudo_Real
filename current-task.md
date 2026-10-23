@@ -1,7 +1,7 @@
 # Current task
 
 Goal: 将 TTT 的旧流式 FADA 和新冻结基座轨迹差分方法接入 RoboJudo_Real 的 G1 真机部署链，保留冻结推理模式，并以离线闭环与单独授权的真机验证区分工程接通和实际效果。
-Do not: 本轮仅实施第 2 步已确认的接收年龄纯计算提取、小型原生语义用例、一次聚焦离线验证及既有 README/本板同步；不重做其他步骤。不切换/新建分支，不运行物理仿真、训练、DDS 或真机命令，不连接服务器，不安装包或修改共享环境。不改变接收回调、缓存同步、Python 公共接口、采集/优化/worker 协议、PD、关节顺序或控制器生命周期；不复制 checkpoint。纯计算通过不等于完整 SDK 扩展构建/实际接收验证，原生及强杀资源边界继续保留。
+Do not: 本轮仅实施已确认的速度触发在线学习门控、相对采集计时、受影响的 SDK-free 入口用例及既有 README/本板同步。不修改 RlPipeline 控制激活逻辑、启动脚本、速度大小/输入方式、网卡/XML、环境、native、损失/窗口/频率数值、worker 协议、PD 或关节顺序；不推送/部署，不运行服务器、DDS 或真机命令。用户自行配置服务器与真机的有线网络；不取消 max_sensor_age_s 等已有前置检查。
 
 Current identity:
 - 目标: `/Users/chengyuxuan/ArtiIntComVis/RoboJudo_Real`，当前 `release`，基线 `8ee66e918e3d2370bd3c262cbd1388f0872a3ad0`；调研开始时工作区干净。路线以当前 release 为基线，不授权 Git 操作。
@@ -11,10 +11,11 @@ Current identity:
 - 目标配置默认 `g1_hang_book_real.onnx` 保留不变；本地 `assets/models/g1/fada/planner_idm_v022/planner_idm.pt` 已经既有严格 loader/新运行时成功加载并实际前向，契约 g1_fada_state_v2、H=30/K=6。兼容性已证明，但未证明它与此前预期生产 ONNX 来自同一权重，不自动改默认选择。
 
 Confirmed decisions:
-- 用户要求新旧方法共存、轻量式进度管理、先总体路线，再逐步使用 engineering-plan；已授权实施第 1–6 步及本轮第 2 步纯计算补验。第 1、3、4、5、6 步工程/启动交付完成，第 2 步源码/Python 采集和原生纯计算验证完成，但完整 SDK 扩展验收阻塞。未授权连接构建机、依赖安装或真机运行。
+- 用户已授权第 1–6 步、第 2 步纯计算补验及本轮速度门控实现；本轮只在本地 RoboJudo_Real 修改/离线验证。此前用户允许 tmux 只读核对部署终端，目前计划使用服务器有线连接机器人、网卡由用户自行配置；未授权本轮远端修改、安装依赖、Git 推送或实际机器人控制。整体仍为 5/6，完整原生扩展验收未由本轮关闭。
 - 旧方法训练条件是同一历史下的 Y_exec，监督采集时的首动作；新方法训练条件是 Y_nom，固定标签为 U_snapshot + gamma * (First(base(Y_nom)) - First(base(Y_exec)))，省略部分代表同一历史输入。
 - Planner 冻结，只更新 IDM LoRA；新方法的 base IDM 独立冻结，标签不随同批在线优化重算。不恢复单步 q 误差或手工除 action_scale 的标签路线；环境既有动作转换保留。
 - TTT 已完成的离线 smoke 只证明 donor 链路，不证明目标仓库兼容、目标机器实时性或负重适应效果。TTT 的旧 current-task.md 保持关闭，本板是这次迁移唯一状态入口。
+- 新启动约定：prepare 后零速度期间正常控制并记录真实下发历史，不开始学习；首个生效的非零三轴速度一次性开启采集，窗口成熟才更新。速度归零不关闭学习；reset/离开激活控制重新等待，保留已有权重/Adam/已接受任务，并把旧结果的发布延迟到重新触发后。warmup/interval 数值不变，只调整相对起点，真实控制步不重编号。
 
 Progress:
 - [x] 总体路线与源代码边界核对完成；工程离线验收进度 5/6 (第 1、3、4、5、6 步完成，第 2 步部分完成)，不是原生或真机部署验收。
@@ -82,6 +83,10 @@ Progress:
   - Evidence B: 同工作流的 4 个针对性用例全部 OK (4.505s；恢复执行的命令墙钟 7.48s)：发送异常不确认、worker READY 后控制器构造失败仍安全清理、act=false 硬件前拒绝；真实 Python Unitree wrapper 的部分初始化失败/disabled receipt/幂等 shutdown；真实 main 的 prepare 后 KeyboardInterrupt/finally；受影响的非法请求硬件前拒绝契约。额外正向路径覆盖跌倒、learner 进程终止、急停前不再下发。worker/接收线程均已回收。
   - Failed fixture/resume: 首次工作流 none/旧方法已经通过，expert 启动被测试 patch.dict(sys.modules) 卸载 multiprocessing.heap 后的类身份冲突阻塞；只将夹具恢复范围缩到 SDK 两个模块，保留无关模块缓存，然后继续 expert 和未运行用例，没有重跑已通过模式或第 1–4 步套件。过时 inference-only/错误措辞断言已改成行为边界检查，没有新增流程产物。
   - Scope/limits: 只使用 skill-router + code-construction，没有全面审查、依赖安装或 Git 操作。测试仅在本模块替换休眠/传感时钟，未冻结全局 monotonic；临时 paired PT 由上下文回收。SDK 替身不证明 native v1 已构建、真实 DDS 收发/电机动作、目标机 20ms、生产 PT/ONNX 同源或负重适应有效；第 4 步强杀 semaphore 警告边界未被关闭。
+  - Velocity-gate follow-up/change: 本轮仅修改 `fada_policy.py` 的构造/reset/set_control_active/get_action/confirm_action_submission/stop 和 `fada/online_controller.py` 的首个 observe 起点/相对调度/status/reset，以及既有测试、README/本板。adapter 的 `_adaptation_started` 与 `_control_active` 分离，另以 `_pending_collection` 固化每次查询的采集资格；等待时仍 infer/snapshot/真实发送/receipt 后提交 raw history 和实际计步、poll worker 健康，但不 observe/record collector、不 try_submit 或 apply。触发不清控制历史，无额外 forward；none 不变。
+  - Velocity-gate follow-up/timing: coordinator 增加 collection_start_control_step/collection_step 状态，未触发时均为 None，保持原 worker.state 枚举。使用真实 evidence.control_step 定位与样本身份，首次 active observe 设采集锚点，warmup/interval 仅用相对差值；reset 清锚点但保留既有成熟旧批/在途 job/待发布结果/worker/Adam 规则。没有把中途开始的采集伪造成 control_step=0。
+  - Velocity-gate follow-up/evidence: 唯一一次 uv SDK-free 工作流只运行改造后的 `TestFADADeploymentIntegration.test_registered_comparison_profiles_run_through_main`，1 个用例含 none/fada/expert_difference 三模式，4.752s 全部 OK，命令墙钟 6.34s。真实 -c/ConfigManager/main/prepare/control/finally、小型真实网络/LoRA 和 spawn worker；53 个零速实际步 (>warmup且非 interval 整倍数) 内无样本/job/更新，receipt 后动作历史/计步仍推进；w 触发保留原历史，以真实步53为起点，相对40步才提交。首个结果完成但未应用时 reset，随后12个零速步不发布且 actor 不变；s 重新触发才应用 version=1/改变固定探针输出，再 x 归零仍继续采集；同一 worker 保留且最后进程/接收线程均回收。none 全参数不变。
+  - Velocity-gate follow-up/tests and delivery: 原 Commands 夹具增加真实格式的一次性 keyboard event；基本 `exercise_mode` 的 online 正向用例改为显式 w，不把零速自动学习旧行为重新固定。只执行上述新入口风险用例，没有重跑其他套件/审查。README 解释一次性门控、相对计时、reset 旧结果发布和新增状态；按用户实际 Conda/Python 部署入口修正命令并保留 DDS XML 选择，不改任何启动脚本或环境。本轮未连接或修改远端，代码尚需用户自行同步到服务器。
 
 - [x] 6. 离线闭环与启动交付 — 三模式注册配置、正式入口离线验证及启动说明已完成；第 2 步原生依赖仍阻塞，不能记为 6/6。
   - Changed/owners: `robojudo/config/g1/g1_cfg.py` 增加共享 `_fada_comparison_policy` 和注册 `g1_real_fada_baseline` / `g1_real_fada_online` / `g1_real_fada_expert_online`；既有测试文件增加 `TestFADADeploymentIntegration.test_registered_comparison_profiles_run_through_main`；仅同步 README/本板。未修改第 5 步控制代码、优化目标、协议、native 或默认 ONNX。
@@ -89,13 +94,13 @@ Progress:
   - Evidence A: 唯一一次 `uv run --project /Users/chengyuxuan/ArtiIntComVis/TTT --frozen --no-sync python -u -c ...` 工作流，复用原共享环境/实际缓存依赖，无安装。真实 ConfigManager 解析三个注册名，均输出同一现存 `assets/models/g1/fada/planner_idm_v022/planner_idm.pt`；原入口仍输出 `g1_hang_book_real.onnx`。这里只检查实际配置/文件存在，不重跑生产 PT 的旧前向证明。
   - Evidence B: 同次仅运行新增的一个 registered-entry 行为用例 (含三个模式)，整个调用墙钟 5.90s。真实 `-c` parser/ConfigManager/main→prepare→42 个实际策略步→finally；基线全参数不变/无 learner，两种在线方法真实 spawn/更新后完整应用 version=1，且固定探针的实际推理输出随之改变；安全请求及 learner/接收线程退出断言通过。没有重跑第 1–5 步用例或全面审查。
   - Fixture boundary: 复用现有硬件隔离夹具，不创建 SDK controller；ConfigManager 真实加载注册配置后仅临时替换为小型 paired PT、CPU、明确合成接收预算、无 debug/kinematics、加速调度。未覆写 method 或生产优化超参，未伪造网络、梯度或学习结果；临时 PT 随上下文清除。不是生产权重闭环、物理仿真或真实 50Hz 验证。
-  - Delivery/docs: README 包含三条多行 `uv run --active --no-sync` 命令及已激活/依赖齐全环境前提、共享 PT/网卡/年龄预算配置位置、原入口保留、control_step/learner_version/policy_version 区别、现有可选 msgpack debug 产物与开销、Ctrl-C/keyboard 限制、无自动 adapted checkpoint 导出/恢复、原生补验和独立硬件授权边界。
+  - Delivery/docs: README 提供三个方法的明确入口、共享 PT/网卡/年龄预算配置位置、完成/应用版本与 debug 产物、退出与后台时序限制。本轮速度门控追加中已按既有 Conda/Python 使用方式修正启动说明，原第 6 步初版 uv 部署命令不再作为这三模式的要求；本地离线验证仍复用原 TTT uv 环境。
   - Completion limit: SDK2/CycloneDDS/pybind11 环境尚缺，不进行重复已知失败的构建或安装；仅补清原生构建/导入/离线元信息验证要求，不将仅导入/版本属性当作真实接收年龄计算或 DDS/电机证据。第 4 步 SIGKILL semaphore 清理警告未结案。当前目标机 20ms、IMU/DDS 新鲜度、物理停机、PT/ONNX 同源与负重适应效果均未证明。
 
 Blockers:
 - 第 1、3、4、5、6 步 Python 工程/启动交付已离线验收；第 2 步尚缺原生构建/运行证据，因此进度为 5/6，非部署验收。强杀 semaphore 清理警告仍保留，不宣称全部 IPC 无遗留。
-- 明确阻塞：此前 CMake 默认路径核查未发现 SDK2/CycloneDDS；本轮当前 uv 的 pybind11/scikit_build_core/unitree_cpp 模块均不可找到。需要匹配目标系统/架构/Python ABI 的完整 SDK 构建环境，验证修改后的扩展及 Python 读出；未获连接构建机或安装依赖授权。
-- 当前共享 uv 环境仍未安装部分 RoboJudo 已声明依赖，本轮临时使用实际缓存包完成离线检查；目标设备、实时余量、DDS 时差和生产 PT/原 ONNX 的权重对应关系未验证。
+- 本地原生验证边界：此前默认路径核查未发现 SDK2/CycloneDDS，本地 uv 缺 pybind11/scikit_build_core/unitree_cpp。用户报告远端环境齐全，不能据本地缺包推断远端缺包；但完整新绑定、目标 ABI/Python 读出和实际 DDS/时效仍未由本轮验证，阶段 2 保留未完成。
+- 本轮本地离线验证继续使用既有共享 uv/实际缓存依赖，未修改环境。远端网卡和 CycloneDDS XML 由用户手动配置；max_sensor_age_s 仍需部署时显式设置，不用测试预算替代实际预算。目标设备实时余量、停机效果及生产 PT/ONNX 同源性仍未证明。
 
 Next:
-- 在用户指定且授权、依赖齐全且匹配目标 ABI 的构建环境执行完整 unitree_cpp 构建及真实绑定/Python 读出补验；保留已完成的纯计算证据，不重复旧套件，不启动硬件控制器。
+- 由用户将本轮本地门控修改同步到服务器；网卡由用户自行配置，原生绑定补验及实际部署仍按单独授权执行。

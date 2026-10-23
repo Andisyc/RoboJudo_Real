@@ -286,7 +286,7 @@ The existing FADA frozen-inference profile keeps its original ONNX default.
 After configuring its network interface and deployment prerequisites, use:
 
 ```bash
-uv run --active --no-sync python scripts/run_pipeline.py -c g1_real_fada_planner_idm
+python scripts/run_pipeline.py -c g1_real_fada_planner_idm
 ```
 
 This is the frozen-inference FADA entry (`online_adaptation.method="none"`).
@@ -444,7 +444,7 @@ A background transport thread receives complete result messages; control-side
 does not make it wait for the remaining pipe frame. The monotone stop flag has
 no process-owned lock.
 
-The single control writer uses this order:
+Once deployment collection has been triggered, the single control writer uses this order:
 
 1. `observe(state, command, evidence)` closes the preceding physical submission.
 2. `poll()` receives validated completions; `apply_pending_at_step_boundary()`
@@ -464,11 +464,17 @@ are separate: `status` reports completed/applied versions, in-flight job,
 pending counts, update statistics and latency. A result cannot admit another
 job until its version is applied.
 
+The collection start is recorded separately from the real episode control-step
+index. Warmup and interval eligibility use elapsed control steps from that
+collection start, not time spent waiting for a velocity command. The numeric
+warmup/window/interval settings and legacy partial-batch behavior are unchanged.
+
 `reset()` requires a new increasing episode identity, clears incomplete data
 and unsubmitted expert samples, but retains legacy mature data and accepted
 complete jobs. A pre-reset job may finish and its learning is retained; it can
-only acknowledge its original IDs and publish at a subsequent active control
-boundary. No new job/publication is admitted during inactive preparation.
+only acknowledge its original IDs and publish after collection is triggered
+again at a valid control boundary. No new job/publication is admitted during
+preparation or zero-command waiting before that trigger.
 Ordinary reset does not reset Adam, the frozen base or deployment anchor.
 
 `request_stop()` invalidates pending publication without waiting for learning.
@@ -520,6 +526,24 @@ and reset at step 900 remain. Ordinary resets retain the learner/Adam/base/ancho
 and learned weights while invalidating unconfirmed queries and incomplete
 trajectories; active physical history cannot be rewound using snapshot restore.
 
+Online learning has a separate, one-shot velocity gate. After preparation,
+zero-command waiting still performs policy inference, actual submissions and
+receipt-confirmed raw action-history commits, but does not collect training
+samples, submit updates or publish weights. The first effective nonzero
+forward/lateral/yaw command during active control triggers collection. The
+control history and real control-step index are not reset at this transition;
+waiting history remains legitimate model context, not fabricated training
+targets. The legacy collector retains its existing mid-episode history rules.
+
+After triggering, `x` clears the velocity command but does not disable learning.
+Reset or leaving active control closes the gate and restarts collection-relative
+timing, without resetting learned weights/Adam or changing accepted-job retention.
+Old in-flight work may complete while waiting, but cannot publish until the
+next trigger; warmup governs new submissions, not retained-result publication.
+The worker still completes its READY handshake on the cold path and is polled
+for failures while waiting. Neither process startup nor a blocking wait is
+introduced into control steps. Frozen `none` mode is unchanged.
+
 `RlPipeline.should_stop/request_stop/close` and the entry's `try/finally` cover
 normal stop, emergency commands, falls, learner errors, submission errors and
 interrupts. Existing actuator damping shutdown is requested before waiting to
@@ -559,15 +583,17 @@ with the original ONNX.
 
 **Prerequisites, not an authorization to run hardware:**
 
-- Use an already installed RoboJudo environment with its declared dependencies,
-  matching PyTorch and rebuilt `unitree_cpp` evidence-v1 binding. The commands
-  below assume that environment is activated (`VIRTUAL_ENV` is set) and use
-  `--active --no-sync`; they do not install dependencies or create a new setup.
-  The local migration smoke used the existing TTT uv environment plus cached
-  dependencies, not a validated standalone RoboJudo deployment environment.
+- Use an already installed and activated RoboJudo environment with its declared
+  dependencies, matching PyTorch and rebuilt `unitree_cpp` evidence-v1 binding.
+  The deployment commands below follow the existing Conda/Python entry; they
+  do not create an environment, install dependencies or invoke uv.
+  Local SDK-free verification separately reused the existing TTT uv environment
+  plus cached dependencies; it did not validate a target deployment environment.
 - Set `env.unitree.net_if` in the shared parent
   `g1_real_fada_planner_idm` for the deployment host. The comparison profiles
   inherit its G1 position-control/torso-IMU/safety configuration.
+  Configure the interface in `cyclonedds.xml` consistently as well; the network
+  setup remains a deployment-host responsibility.
 - In `_fada_comparison_policy`, replace `max_sensor_age_s=None` with an explicit
   positive **local receive-age** budget established for that deployment. Online
   profiles intentionally refuse to start without it, before constructing the
@@ -581,27 +607,30 @@ with the original ONNX.
 From the repository root, choose **one** profile after satisfying those
 prerequisites and obtaining authorization for the actual robot run:
 
+As in the existing launch wrapper, select the configured DDS XML:
+
+```bash
+export CYCLONEDDS_URI="file://$PWD/cyclonedds.xml"
+```
+
 Frozen shared-PT reference:
 
 ```bash
-uv run --active --no-sync python \
-  scripts/run_pipeline.py \
+python scripts/run_pipeline.py \
   -c g1_real_fada_baseline
 ```
 
 Legacy streaming FADA:
 
 ```bash
-uv run --active --no-sync python \
-  scripts/run_pipeline.py \
+python scripts/run_pipeline.py \
   -c g1_real_fada_online
 ```
 
 Frozen-base trajectory-difference streaming:
 
 ```bash
-uv run --active --no-sync python \
-  scripts/run_pipeline.py \
+python scripts/run_pipeline.py \
   -c g1_real_fada_expert_online
 ```
 
@@ -610,14 +639,23 @@ The entry only accepts `-c/--config`; dotted Hydra overrides or a
 Ctrl-C exits through the common safety-request/cleanup path; the generic
 Unitree-controller `A` mapping below is not selected by these profiles.
 Independently verify the physical emergency-stop procedure before any live use.
+These direct commands do not start the optional trajectory recorder from
+`start.sh`; that wrapper retains its own invocation and does not forward `-c`.
+After preparation, issue a velocity command to start online collection. In the
+existing keyboard configuration, `w` requests forward velocity and `x` clears
+the requested velocity; neither key is a physical emergency-stop guarantee.
 
 **Reading progress and outputs:** online submitted steps carry
-`extras["fada_online"]`: `control_step` is an actual policy-step index,
-`learner_version` is the completed learner version, and `policy_version` is the
+`extras["fada_online"]`: `control_step` is the latest real policy-step index
+offered to the collector (`-1` before collection starts).
+`collection_start_control_step` and `collection_step` are `None` while waiting
+for the first nonzero velocity command, then report its real start index and
+elapsed control steps. The worker's existing `state` enum is unchanged.
+`learner_version` is the completed learner version; `policy_version` is the
 version actually installed for subsequent inference. Completion is not
-publication. `pending_samples`, `inflight_samples`, `state`, `failure`,
-`last_update` and `last_latency_s` expose collection/update state; a zero
-version before sufficient valid frames is not by itself an error.
+publication. `pending_samples`, `inflight_samples`, `failure`, `last_update`
+and `last_latency_s` expose collection/update state. A ready worker or a zero
+policy version while waiting does not mean online learning has started.
 
 These fields are not automatically printed as a terminal progress bar. The
 existing `debug.log_obs=True` recorder can write them under each record's

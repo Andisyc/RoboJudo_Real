@@ -501,6 +501,9 @@ class RlPipeline(Pipeline):
 
         time.sleep(0.01)
         pbar.close()
+        if self._fada_adapter is not None and not self.should_stop():
+            # Start policy control like simulation, without resetting the robot.
+            self._fada_adapter.reset()
         logger.warning("prepare_done")
 
 

@@ -596,9 +596,12 @@ The profile explicitly reads keyboard input from the launching terminal, even
 when `DISPLAY` is set. Focus that terminal: press `w` to move forward at 0.6m/s
 or `x` to clear the velocity command; Enter is not required.
 
-Frozen FADA self-check/preparation retains observed state history without
-committing discarded predictions. Action history and last-action feedback
-resume when policy control becomes active.
+FADA self-check/preparation warms the network without committing discarded
+predictions. After successful preparation, the policy resets its gait phase,
+observation/action histories, last action, keyboard command and IMU yaw reference
+before `prepare_done`, matching simulation's cold start. This final policy reset
+does not reset the environment, dispatch a motor target or change PD/model
+parameters, and is skipped if a stop has been requested.
 
 The original `g1_real_fada_planner_idm` profile still selects
 `g1_hang_book_real.onnx`; it is not the shared-PT comparison baseline. The runtime

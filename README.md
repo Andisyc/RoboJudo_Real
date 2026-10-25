@@ -564,9 +564,11 @@ unverified. The comparison entry/configuration delivery is described below.
 
 #### Comparison startup profiles (step 6)
 
-These profiles use the same existing paired checkpoint,
-`assets/models/g1/fada/planner_idm_v022/planner_idm.pt`, through the shared
-`_fada_comparison_policy` in `robojudo/config/g1/g1_cfg.py`:
+These profiles use the same v024 `close_some_dr` paired checkpoint,
+`assets/models/g1/fada/plaidm_v024_close_some_dr/planner_idm_close_some_dr_v001.pt`,
+through the shared `_fada_comparison_policy` in `robojudo/config/g1/g1_cfg.py`.
+Place this exact checkpoint on each deployment host; the original local artifact
+is `FADA_Unofficial/model/plaidm_v024_close_some_dr/planner_idm_close_some_dr_v001.pt`.
 
 | Registered configuration | Method | Learner |
 |---|---|---|
@@ -574,19 +576,21 @@ These profiles use the same existing paired checkpoint,
 | `g1_real_fada_online` | `fada` | Legacy realized-trajectory regression |
 | `g1_real_fada_expert_online` | `expert_difference` | Frozen-base trajectory-difference targets |
 
-All three comparison profiles disable gait phase and fix its observation to
-`[0.0, 0.0]` in the shared helper, matching the phase-neutral v022 training setup.
+All three comparison profiles enable the configured-gait v024 behavior:
+1.5Hz gait frequency, initial left/right phases `[0.0, pi]`, and 50Hz control.
+Raw actions remain joint-position offsets with unit execution scaling; the
+existing default pose, PD gains and preparation/update gates are unchanged.
 
 Frozen FADA self-check/preparation retains observed state history without
 committing discarded predictions. Action history and last-action feedback
 resume when policy control becomes active.
 
 The original `g1_real_fada_planner_idm` profile still selects
-`g1_hang_book_real.onnx`; it is not the shared-PT comparison baseline. No
-checkpoint is copied, scanned for or silently substituted. To use a different
+`g1_hang_book_real.onnx`; it is not the shared-PT comparison baseline. The runtime
+does not copy, scan for or silently substitute a checkpoint. To use a different
 verified paired PT in all three comparison profiles, set `checkpoint_path` in
-the shared helper. PT compatibility does not establish provenance equivalence
-with the original ONNX.
+the shared helper. Matching architecture does not establish weight or behavior
+equivalence with the original ONNX or another checkpoint.
 
 **Prerequisites, not an authorization to run hardware:**
 

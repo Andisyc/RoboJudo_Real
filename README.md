@@ -581,6 +581,12 @@ All three comparison profiles enable the configured-gait v024 behavior:
 Raw actions remain joint-position offsets with unit execution scaling; the
 existing default pose, PD gains and preparation/update gates are unchanged.
 
+FADA paired-PT initialization on CPU sets the control process's PyTorch
+intra-op thread count to one before loading the model, including online modes.
+This bounds the CPU thread pool used by inference; it is process-wide, not a
+hard real-time latency guarantee. Learner subprocesses keep their independent
+`learner_threads` setting. ONNX and CUDA initialization are unchanged.
+
 Frozen FADA self-check/preparation retains observed state history without
 committing discarded predictions. Action history and last-action feedback
 resume when policy control becomes active.

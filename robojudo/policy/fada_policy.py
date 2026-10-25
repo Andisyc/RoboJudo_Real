@@ -6,6 +6,7 @@ from numbers import Integral
 from pathlib import Path
 
 import numpy as np
+import torch
 
 from robojudo.policy import policy_registry
 
@@ -82,6 +83,9 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
 
     def _build_runtime(self, policy_file: str):
         suffix = Path(policy_file).suffix.lower()
+        if suffix in {".pt", ".pth"} and torch.device(self.device).type == "cpu":
+            # Bound CPU inference jitter before constructing either PT runtime.
+            torch.set_num_threads(1)
         expected_contract = (
             FADA_G1_STATE_DIM,
             FADA_G1_ACTION_DIM,

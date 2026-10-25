@@ -18,6 +18,17 @@ logger = logging.getLogger(__name__)
 class MujocoEnv(Environment):
     cfg_env: MujocoEnvCfg
 
+    @staticmethod
+    def validate_online_config(cfg_env):
+        if (not cfg_env.is_sim or cfg_env.actuator_control_mode != "position"
+                or not cfg_env.policy_gyro_sensor or not cfg_env.policy_upvector_sensor
+                or cfg_env.sim_dt <= 0 or cfg_env.sim_decimation <= 0):
+            raise ValueError("online FADA simulation requires position control and policy IMU sensors")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.viewer.is_alive)
+
     def __init__(self, cfg_env: MujocoEnvCfg, device="cpu"):
         super().__init__(cfg_env=cfg_env, device=device)
 
@@ -38,6 +49,8 @@ class MujocoEnv(Environment):
         # mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
         self._apply_init_qpos()
         mujoco.mj_step(self.model, self.data)  # pyright: ignore[reportAttributeAccessIssue]
+        self._simulation_frame_id = 0
+        self._simulation_state_ready_ns = time.monotonic_ns()
 
         self.viewer = mujoco_viewer.MujocoViewer(
             self.model,
@@ -108,11 +121,16 @@ class MujocoEnv(Environment):
             else:
                 mujoco.mj_resetDataKeyframe(self.model, self.data, 0)  # pyright: ignore[reportAttributeAccessIssue]
         mujoco.mj_forward(self.model, self.data)  # pyright: ignore[reportAttributeAccessIssue]
+        self._simulation_frame_id = 0
+        self._simulation_state_ready_ns = time.monotonic_ns()
+        self.update()
 
     def reset(self):
         if self.reset_keyframe is not None:
             mujoco.mj_resetDataKeyframe(self.model, self.data, self.reset_keyframe)
             mujoco.mj_forward(self.model, self.data)
+        self._simulation_frame_id = 0
+        self._simulation_state_ready_ns = time.monotonic_ns()
         if self.born_place_align:  # TODO: merge
             self.born_place_align = False  # disable during reset
             self.update()
@@ -136,6 +154,8 @@ class MujocoEnv(Environment):
 
     def update(self, simple=False):  # TODO: clean sensors in xml
         """simple: only update dof pos & vel"""
+        if not simple:
+            self._sensor_read_started_ns = time.monotonic_ns()
         dof_pos = self.data.qpos.astype(np.float32)[-self.num_dofs :]
         dof_vel = self.data.qvel.astype(np.float32)[-self.num_dofs :]
 
@@ -177,10 +197,16 @@ class MujocoEnv(Environment):
         env_data = super().get_data()
         env_data["policy_gyro"] = self._policy_gyro
         env_data["policy_gravity"] = self._policy_gravity
+        env_data["source"] = "simulation"
+        env_data["simulation_frame_id"] = self._simulation_frame_id
+        env_data["simulation_state_ready_ns"] = self._simulation_state_ready_ns
+        env_data["sensor_read_started_ns"] = self._sensor_read_started_ns
         return env_data
 
-    def step(self, pd_target, hand_pose=None):
+    def step(self, pd_target, hand_pose=None) -> int | None:
         assert len(pd_target) == self.num_dofs, "pd_target len should be num_dofs of env"
+        if not self.enabled:
+            return None
 
         if hand_pose is not None:
             logger.info("Hand pose-->", hand_pose)
@@ -188,6 +214,9 @@ class MujocoEnv(Environment):
         self.viewer.cam.lookat = self.data.qpos.astype(np.float32)[:3]
         if self.viewer.is_alive:
             self.viewer.render()
+        if not self.enabled:
+            return None
+        submitted_ns = time.monotonic_ns()
 
         for _ in range(self.sim_decimation):
             if self.actuator_control_mode == "position":
@@ -199,10 +228,14 @@ class MujocoEnv(Environment):
 
             mujoco.mj_step(self.model, self.data)  # pyright: ignore[reportAttributeAccessIssue]
             self.update(simple=True)
+        self._simulation_frame_id += 1
+        self._simulation_state_ready_ns = time.monotonic_ns()
         self.update(simple=False)
+        return submitted_ns
 
     def shutdown(self):
-        self.viewer.close()
+        if self.enabled:
+            self.viewer.close()
 
 
 if __name__ == "__main__":

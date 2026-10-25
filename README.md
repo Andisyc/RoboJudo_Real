@@ -498,16 +498,18 @@ The official Python adapter/pipeline lifecycle is connected as described below.
 
 `online_adaptation.method` selects `none`, `fada` or `expert_difference`.
 The default remains frozen inference with the original PT/ONNX selection.
-Online modes require an explicit paired PT, positive `max_sensor_age_s`, the
-single-policy `UnitreeCppEnv` G1 position-control path, `act=true`, enabled torso
-IMU and rebuilt `sensor_evidence_version=1` bindings. The learner READY handshake
-and configuration checks run before the hardware controller is constructed.
-Missing capability is an error, not a baseline fallback. Multi-policy online
-adaptation is not enabled by this change.
+Online hardware modes require an explicit paired PT, positive `max_sensor_age_s`,
+the single-policy `UnitreeCppEnv` G1 position-control path, `act=true`, enabled
+torso IMU and rebuilt `sensor_evidence_version=1` bindings. The learner READY
+handshake and configuration checks run before the hardware controller is
+constructed. Validated MuJoCo position-control simulation is also supported,
+using explicit simulation evidence rather than fabricated hardware samples.
+Missing capability remains an error, not a baseline fallback. Multi-policy
+online adaptation is not enabled.
 
 Online queries use `FADAPlaybackController.prepare_query` and one runtime
 snapshot forward; they do not commit their predicted action immediately.
-After `UnitreeCppEnv.step` returns a body-submission monotonic timestamp,
+After the environment returns a valid action-application/submission timestamp,
 `confirm_action_submission` commits the raw policy-order action to history and
 the causal collector. The outgoing command retains the existing default pose,
 execution scale and joint mapping. Absolute PD targets and scaled commands are
@@ -595,6 +597,32 @@ it also starts the hardware DDS trajectory recorder.
 The profile explicitly reads keyboard input from the launching terminal, even
 when `DISPLAY` is set. Focus that terminal: press `w` to move forward at 0.6m/s
 or `x` to clear the velocity command; Enter is not required.
+
+For legacy FADA online updates in MuJoCo, use the same environment and checkpoint:
+
+```bash
+python scripts/run_pipeline.py -c g1_fada_online
+```
+
+This entry starts with zero velocity and no learning; a nonzero terminal velocity
+command triggers collection and background LoRA updates. `x` zeros velocity but
+does not turn learning off; reborn closes the velocity gate again. No Unitree SDK
+controller or DDS participant is created. Rendering requires a graphical display;
+do not use `start.sh` or unset `DISPLAY`.
+
+Simulation evidence is tagged `source="simulation"`. Its frame counter advances
+only after a completed control-period physics step. The action timestamp precedes
+integration; the successor's `simulation_state_ready_ns` must follow it. Repeated
+reads, skipped frames and pre-action states cannot complete learning transitions.
+Hardware evidence keeps its existing receive-age/tick/IMU checks. Reborn clears
+incomplete trajectories and starts a new episode while preserving learned weights
+and existing optimizer/job retention rules. Closing the viewer stops the pipeline
+and learner. The existing fall-detection setting is not changed by this entry.
+
+The bounded headless integration exercised real MuJoCo stepping, v024 inference,
+causal collection, a background LoRA optimizer update and full weight publication.
+Only viewer rendering was substituted; this is not a graphical-window or hardware
+validation.
 
 FADA self-check/preparation warms the network without committing discarded
 predictions. After successful preparation, the policy resets its gait phase,

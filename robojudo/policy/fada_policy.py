@@ -336,8 +336,10 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                 name: env_data.get(name) for name in (
                     "sensor_tick", "torso_imu_sequence", "lowstate_age_s",
                     "torso_imu_age_s", "sensor_read_started_ns",
+                    "simulation_frame_id", "simulation_state_ready_ns",
                 )
             }
+            self._pending_sensor["source"] = env_data.get("source", "hardware")
         commands = self._get_commands(ctrl_data)
         policy_gyro = getattr(env_data, "policy_gyro", None)
         policy_gravity = getattr(env_data, "policy_gravity", None)

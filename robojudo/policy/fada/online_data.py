@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from numbers import Integral
+from typing import Literal
 
 import torch
 
@@ -43,7 +44,7 @@ def _future(value: torch.Tensor, reference: torch.Tensor) -> int:
 
 @dataclass(frozen=True)
 class FADAControlEvidence:
-    """Control metadata only; None denotes missing hardware evidence, not a new frame."""
+    """Source-tagged control metadata; missing hardware data never implies simulation."""
 
     episode_id: int
     control_step: int
@@ -56,10 +57,14 @@ class FADAControlEvidence:
     torso_imu_age_s: float | None = None
     sensor_read_started_ns: int | None = None
     action_submitted_ns: int | None = None
+    source: Literal["hardware", "simulation"] = "hardware"
+    simulation_frame_id: int | None = None
+    simulation_state_ready_ns: int | None = None
 
     def __post_init__(self) -> None:
         for name in ("episode_id", "control_step", "policy_version", "sensor_tick", "torso_imu_sequence",
-                     "sensor_read_started_ns", "action_submitted_ns"):
+                     "sensor_read_started_ns", "action_submitted_ns",
+                     "simulation_frame_id", "simulation_state_ready_ns"):
             value = getattr(self, name)
             if value is not None or name in ("episode_id", "control_step", "policy_version"):
                 _index(name, value)
@@ -69,6 +74,13 @@ class FADAControlEvidence:
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not math.isfinite(value) or value < 0.0):
                 raise ValueError(f"{name} must be a finite non-negative age or None")
+        if self.source not in ("hardware", "simulation"):
+            raise ValueError("control evidence source must be hardware or simulation")
+        hardware = (self.sensor_tick, self.torso_imu_sequence, self.lowstate_age_s, self.torso_imu_age_s)
+        simulation = (self.simulation_frame_id, self.simulation_state_ready_ns)
+        if ((self.source == "simulation" and any(value is not None for value in hardware))
+                or (self.source == "hardware" and any(value is not None for value in simulation))):
+            raise ValueError("hardware and simulation evidence must not be mixed")
 
 
 @dataclass(frozen=True)

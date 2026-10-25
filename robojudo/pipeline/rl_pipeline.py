@@ -199,9 +199,15 @@ class RlPipeline(Pipeline):
 
             env_class: type[Environment] = getattr(robojudo.environment, self.cfg.env.env_type)
             if self._online_policy is not None:
-                if self.cfg.env.env_type != "UnitreeCppEnv":
-                    raise ValueError("online FADA requires the single-policy UnitreeCppEnv deployment")
-                env_class.validate_online_config(self.cfg.env)
+                if self.cfg.env.env_type == "UnitreeCppEnv":
+                    env_class.validate_online_config(self.cfg.env)
+                elif self.cfg.env.env_type == "MujocoEnv" and self.cfg.env.is_sim:
+                    env_class.validate_online_config(self.cfg.env)
+                    if not np.isclose(self.cfg.env.sim_dt * self.cfg.env.sim_decimation,
+                                      1.0 / self.cfg.policy.freq):
+                        raise ValueError("online FADA simulation must advance one policy period per step")
+                else:
+                    raise ValueError("online FADA requires UnitreeCppEnv or validated MuJoCo simulation")
                 self._online_policy.start_online()
             self.env: Environment = env_class(cfg_env=self.cfg.env, device=self.device)
             self.ctrl_manager = CtrlManager(cfg_ctrls=self.cfg.ctrl, env=self.env, device=self.device)
@@ -293,6 +299,9 @@ class RlPipeline(Pipeline):
             logger.error("Robot fallen! Shutdown for safety.")
             if hasattr(self.env, "reborn"):
                 self.env.reborn()  # pyright: ignore[reportAttributeAccessIssue]
+                if self._online_policy is not None:
+                    self.policy.reset()
+                    self.ctrl_manager.reset()
             else:
                 self.request_stop()
 
@@ -310,6 +319,10 @@ class RlPipeline(Pipeline):
                 if hasattr(self.env, "reborn"):
                     logger.warning("Simulation Env reborn!")
                     self.env.reborn()  # pyright: ignore[reportAttributeAccessIssue]
+                    if self._online_policy is not None:
+                        self.policy.reset()
+                        self.ctrl_manager.reset()
+                        return
 
         self.ctrl_manager.post_step_callback(ctrl_data)
 
@@ -362,8 +375,9 @@ class RlPipeline(Pipeline):
         # update [dof, odo, FK, con]
         self.env.update()
         if online is not None and not dry_run:
+            episode_id = online.online_coordinator.episode_id
             self.safety_check()
-            if self.should_stop():
+            if self.should_stop() or online.online_coordinator.episode_id != episode_id:
                 return
 
         # get proprioception
@@ -391,6 +405,9 @@ class RlPipeline(Pipeline):
         if not dry_run and (online is None or active):
             receipt = self.env.step(pd_target, extras.get("hand_pose", None))
             if online is not None:
+                if self.cfg.env.is_sim and not self.env.enabled:
+                    self.request_stop()
+                    return
                 online.confirm_action_submission(receipt)
                 extras["fada_online"] = online.online_coordinator.status
 

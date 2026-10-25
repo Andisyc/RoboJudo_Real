@@ -200,6 +200,13 @@ class g1_fada_baseline(g1_fada_planner_idm):
 
 
 @cfg_registry.register
+class g1_fada_online(g1_fada_baseline):
+    """Legacy streaming FADA in MuJoCo, without Unitree hardware."""
+
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("fada")
+
+
+@cfg_registry.register
 class g1_real_fada_baseline(g1_real_fada_planner_idm):
     """Frozen paired-PT reference for the streaming comparisons."""
 

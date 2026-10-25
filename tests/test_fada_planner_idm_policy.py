@@ -424,6 +424,57 @@ class TestFADACausalCollectors(unittest.TestCase):
         recorded = collector.record_action(self.snapshot(collector.config, step, command), submission)
         return result, recorded
 
+    def test_simulation_frames_require_execution_and_cannot_cross_reset(self):
+        config = self.architecture(history=3, horizon=2)
+
+        def simulation(step, episode=0, **changes):
+            read = self.evidence(step, episode).sensor_read_started_ns
+            values = dict(
+                source="simulation", sensor_tick=None, torso_imu_sequence=None,
+                lowstate_age_s=None, torso_imu_age_s=None,
+                simulation_frame_id=step, simulation_state_ready_ns=read - 1_000_000,
+            )
+            values.update(changes)
+            return values
+
+        read0 = self.evidence(0).sensor_read_started_ns
+        cases = (
+            ({"simulation_frame_id": 0}, "duplicate_or_reordered_simulation_frame"),
+            ({"simulation_frame_id": 2}, "simulation_frame_gap"),
+            ({"simulation_state_ready_ns": read0 + 500_000}, "frame_not_proven_after_submission"),
+        )
+        for changes, reason in cases:
+            with self.subTest(reason=reason):
+                collector = FADALegacyTrajectoryCollector(config, max_sensor_age_s=0.02)
+                self.event(collector, 0, **simulation(0))
+                result, recorded = self.event(collector, 1, **simulation(1, **changes))
+                self.assertFalse(result.accepted)
+                self.assertEqual(result.rejection_reason, reason)
+                self.assertFalse(recorded.accepted)
+                collector.reset(episode_id=1)
+                samples = []
+                for step in range(5):
+                    result, recorded = self.event(collector, step, episode=1, **simulation(step, 1))
+                    self.assertTrue(result.accepted, result.rejection_reason)
+                    self.assertTrue(recorded.accepted, recorded.rejection_reason)
+                    if result.sample is not None:
+                        samples.append(result.sample)
+                self.assertEqual(samples[0].evidence.episode_id, 1)
+                torch.testing.assert_close(
+                    samples[0].observation_history[0, :, 0], torch.tensor([0., 1., 2.]),
+                )
+                torch.testing.assert_close(
+                    samples[0].realized_future[0, :, 0], torch.tensor([3., 4.]),
+                )
+                torch.testing.assert_close(
+                    samples[0].executed_action_chunk[0, :, 0], torch.tensor([1002., 1003.]),
+                )
+        hardware = FADALegacyTrajectoryCollector(config, max_sensor_age_s=0.02)
+        result, _ = self.event(hardware, 0, sensor_tick=None)
+        self.assertEqual(result.rejection_reason, "missing_sensor_evidence")
+        with self.assertRaises(ValueError):
+            self.evidence(0, simulation_frame_id=0)
+
     def test_exact_causal_slices_tick_wrap_and_late_acknowledgement(self):
         config = self.architecture()
         legacy = FADALegacyTrajectoryCollector(config, max_sensor_age_s=0.04)

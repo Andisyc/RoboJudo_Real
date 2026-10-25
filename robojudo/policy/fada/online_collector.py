@@ -48,6 +48,7 @@ def _frame_key(evidence: FADAControlEvidence) -> tuple:
         evidence.episode_id, evidence.control_step, evidence.sensor_tick,
         evidence.torso_imu_sequence, evidence.sensor_read_started_ns,
         evidence.lowstate_age_s, evidence.torso_imu_age_s,
+        evidence.source, evidence.simulation_frame_id, evidence.simulation_state_ready_ns,
     )
 
 
@@ -101,22 +102,41 @@ class _CausalCollector(ABC):
                      previous: FADAControlEvidence | None) -> str | None:
         if not evidence.policy_control_active:
             return "policy_control_inactive"
-        if (evidence.sensor_tick is None or not 0 <= evidence.sensor_tick < 2**32
-                or evidence.torso_imu_sequence is None or evidence.torso_imu_sequence <= 0
-                or evidence.sensor_read_started_ns is None
-                or evidence.lowstate_age_s is None or evidence.torso_imu_age_s is None):
-            return "missing_sensor_evidence"
-        if max(evidence.lowstate_age_s, evidence.torso_imu_age_s) > self.max_sensor_age_s:
-            return "stale_sensor_frame"
-        if self._last_sensor is not None:
-            previous_tick = self._last_sensor.sensor_tick
-            previous_imu = self._last_sensor.torso_imu_sequence
-            assert previous_tick is not None and previous_imu is not None
-            delta = (evidence.sensor_tick - previous_tick) & 0xFFFFFFFF
-            if not 0 < delta < 2**31:
-                return "duplicate_or_reordered_tick"
-            if evidence.torso_imu_sequence <= previous_imu:
-                return "duplicate_or_reordered_torso_imu"
+        last = self._last_sensor
+        if last is not None and evidence.source != last.source:
+            return "evidence_source_changed"
+        if evidence.source == "simulation":
+            if (evidence.simulation_frame_id is None or evidence.simulation_state_ready_ns is None
+                    or evidence.simulation_state_ready_ns <= 0 or evidence.sensor_read_started_ns is None):
+                return "missing_simulation_evidence"
+            if evidence.simulation_state_ready_ns > evidence.sensor_read_started_ns:
+                return "simulation_state_after_read"
+            if last is not None:
+                assert last.simulation_frame_id is not None and last.simulation_state_ready_ns is not None
+                if evidence.simulation_frame_id <= last.simulation_frame_id:
+                    return "duplicate_or_reordered_simulation_frame"
+                self._last_sensor = evidence
+                if evidence.simulation_frame_id != last.simulation_frame_id + 1:
+                    return "simulation_frame_gap"
+                if evidence.simulation_state_ready_ns <= last.simulation_state_ready_ns:
+                    return "non_monotonic_simulation_state"
+        else:
+            if (evidence.sensor_tick is None or not 0 <= evidence.sensor_tick < 2**32
+                    or evidence.torso_imu_sequence is None or evidence.torso_imu_sequence <= 0
+                    or evidence.sensor_read_started_ns is None
+                    or evidence.lowstate_age_s is None or evidence.torso_imu_age_s is None):
+                return "missing_sensor_evidence"
+            if max(evidence.lowstate_age_s, evidence.torso_imu_age_s) > self.max_sensor_age_s:
+                return "stale_sensor_frame"
+            if last is not None:
+                previous_tick = last.sensor_tick
+                previous_imu = last.torso_imu_sequence
+                assert previous_tick is not None and previous_imu is not None
+                delta = (evidence.sensor_tick - previous_tick) & 0xFFFFFFFF
+                if not 0 < delta < 2**31:
+                    return "duplicate_or_reordered_tick"
+                if evidence.torso_imu_sequence <= previous_imu:
+                    return "duplicate_or_reordered_torso_imu"
         # A received frame must not be reused even if its transition is rejected later.
         self._last_sensor = evidence
         if previous is not None:
@@ -145,15 +165,20 @@ class _CausalCollector(ABC):
         if error is not None:
             return self._reject(error)
         assert evidence.sensor_read_started_ns is not None
-        assert evidence.lowstate_age_s is not None and evidence.torso_imu_age_s is not None
         pending = self._pending
         sample = None
         if pending is not None:
             submitted = pending.evidence.action_submitted_ns
             assert submitted is not None
-            elapsed = (evidence.sensor_read_started_ns - submitted) / 1e9
-            if elapsed <= max(evidence.lowstate_age_s, evidence.torso_imu_age_s):
-                return self._reject("frame_not_proven_after_submission")
+            if evidence.source == "simulation":
+                assert evidence.simulation_state_ready_ns is not None
+                if evidence.simulation_state_ready_ns <= submitted:
+                    return self._reject("frame_not_proven_after_submission")
+            else:
+                assert evidence.lowstate_age_s is not None and evidence.torso_imu_age_s is not None
+                elapsed = (evidence.sensor_read_started_ns - submitted) / 1e9
+                if elapsed <= max(evidence.lowstate_age_s, evidence.torso_imu_age_s):
+                    return self._reject("frame_not_proven_after_submission")
             if state.dtype != pending.snapshot.action_snapshot.dtype or state.device != pending.snapshot.action_snapshot.device:
                 return self._reject("transition_dtype_or_device_changed")
             sample = self._complete(pending, state)

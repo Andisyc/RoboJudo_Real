@@ -192,6 +192,13 @@ def _fada_comparison_policy(method: str) -> G1FADAPlannerIDMPolicyCfg:
 
 
 @cfg_registry.register
+class g1_fada_baseline(g1_fada_planner_idm):
+    """Frozen v024 reference in MuJoCo, without hardware or online learning."""
+
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("none")
+
+
+@cfg_registry.register
 class g1_real_fada_baseline(g1_real_fada_planner_idm):
     """Frozen paired-PT reference for the streaming comparisons."""
 

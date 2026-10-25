@@ -587,6 +587,12 @@ This bounds the CPU thread pool used by inference; it is process-wide, not a
 hard real-time latency guarantee. Learner subprocesses keep their independent
 `learner_threads` setting. ONNX and CUDA initialization are unchanged.
 
+For the frozen v024 MuJoCo baseline, run
+`python scripts/run_pipeline.py -c g1_fada_baseline` from the repository root in
+an environment with a graphical display. This profile disables online updates
+and does not initialize Unitree hardware. Do not use `start.sh` for simulation:
+it also starts the hardware DDS trajectory recorder.
+
 Frozen FADA self-check/preparation retains observed state history without
 committing discarded predictions. Action history and last-action feedback
 resume when policy control becomes active.

@@ -276,6 +276,54 @@ class TestFADAPlannerIDMMigration(unittest.TestCase):
             self.assertTrue(np.isfinite(action).all())
 
 
+class TestMujocoShoulderPayload(unittest.TestCase):
+    def test_rigid_mass_gravity_and_reset_preserve_live_state(self):
+        import mujoco
+        from robojudo.environment.utils.mujoco_payload import MujocoShoulderPayload
+
+        model = mujoco.MjModel.from_xml_string("""
+            <mujoco><worldbody><body name="torso_link" pos="0 0 0.8">
+            <freejoint/><inertial pos="0.01 -0.01 0.03" mass="10"
+            diaginertia="0.2 0.3 0.4"/>
+            </body></worldbody></mujoco>
+        """)
+        data = mujoco.MjData(model)
+        data.time = 0.75
+        mujoco.mj_forward(model, data)
+        body = model.body("torso_link").id
+        baseline = tuple(array[body].copy() for array in (
+            model.body_mass, model.body_ipos, model.body_inertia, model.body_iquat,
+        ))
+        bias = data.qfrc_bias.copy()
+        qpos, qvel, clock = data.qpos.copy(), data.qvel.copy(), data.time
+        disabled = MujocoShoulderPayload(model, data, enabled=False)
+        disabled.before_step([0.6, 0.0, 0.0])
+        self.assertEqual(float(model.body_mass[body]), 10.0)
+        payload = MujocoShoulderPayload(model, data, enabled=True)
+        payload.before_step([0.0, 0.0, 0.0])
+        self.assertFalse(payload.active)
+        payload.before_step([0.6, 0.0, 0.0])
+        self.assertEqual(float(model.body_mass[body]), 13.0)
+        np.testing.assert_allclose(
+            data.qfrc_bias[3:6] - bias[3:6],
+            -np.cross(payload.position, payload.mass_kg * model.opt.gravity),
+            atol=1e-9,
+        )
+        np.testing.assert_array_equal(data.qpos, qpos)
+        np.testing.assert_array_equal(data.qvel, qvel)
+        self.assertEqual(data.time, clock)
+        payload.before_step([0.6, 0.0, 0.0])
+        self.assertEqual(float(model.body_mass[body]), 13.0)
+        self.assertTrue(np.all(model.body_inertia[body] > 0))
+        payload.reset()
+        self.assertFalse(payload.active)
+        for actual, expected in zip((
+            model.body_mass, model.body_ipos, model.body_inertia, model.body_iquat,
+        ), baseline):
+            np.testing.assert_array_equal(actual[body], expected)
+        np.testing.assert_allclose(data.qfrc_bias, bias, atol=1e-9)
+
+
 class TestFADATrainableRuntime(unittest.TestCase):
     def test_zero_delta_and_real_lora_update_preserve_frozen_modules(self):
         with tempfile.TemporaryDirectory() as directory, torch.random.fork_rng():
@@ -1512,7 +1560,7 @@ class TestFADADeploymentIntegration(unittest.TestCase):
             entry = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(entry)
             with patch.dict(pipelines.__dict__, {"FADASmokePipeline": InterruptPipeline}), \
-                    patch.object(entry, "parse_args", return_value=SimpleNamespace(config="offline")), \
+                    patch.object(entry, "parse_args", return_value=SimpleNamespace(config="offline", left_shoulder_load=False)), \
                     patch.object(entry, "ConfigManager", return_value=SimpleNamespace(get_cfg=lambda: cfg)):
                 entry.main()
             pipeline = captured[0]

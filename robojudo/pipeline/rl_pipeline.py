@@ -403,7 +403,13 @@ class RlPipeline(Pipeline):
 
         # if not dummy_env update obs info
         if not dry_run and (online is None or active):
-            receipt = self.env.step(pd_target, extras.get("hand_pose", None))
+            if self.cfg.env.env_type == "MujocoEnv":
+                receipt = self.env.step(
+                    pd_target, extras.get("hand_pose", None),
+                    velocity_command=extras.get("commands"),
+                )
+            else:
+                receipt = self.env.step(pd_target, extras.get("hand_pose", None))
             if online is not None:
                 if self.cfg.env.is_sim and not self.env.enabled:
                     self.request_stop()

@@ -610,6 +610,27 @@ does not turn learning off; reborn closes the velocity gate again. No Unitree SD
 controller or DDS participant is created. Rendering requires a graphical display;
 do not use `start.sh` or unset `DISPLAY`.
 
+Add `--left-shoulder-load` to enable a forward-triggered 3kg payload:
+
+```bash
+python scripts/run_pipeline.py -c g1_fada_online --left-shoulder-load
+```
+
+The option defaults off and also works with `g1_fada_baseline` for comparisons.
+The first positive forward velocity command (`w`) attaches it before that physics
+step; repeated `w` does not stack mass, and `x` does not detach it. Reset/reborn
+restores the nominal inertial properties and rearms the trigger for the next `w`.
+The option is rejected for real hardware before any pipeline/controller starts.
+
+The load is rigidly combined with `torso_link` at body-local position
+`[0.004, 0.22, 0.15]`m, matching the TTT left-shoulder setup. It updates mass,
+center of mass and full inertia using a 3kg box with half-size `[0.08, 0.06, 0.12]`m.
+An orange `3 kg` box marks its location and `[PAYLOAD]` logs attachment; the
+marker is visual only, without additional collision geometry. Model constants
+are recomputed using scratch data so attaching/restoring does not reset live
+joint positions, velocities or simulation time. No TTT runtime dependency is
+introduced.
+
 Simulation evidence is tagged `source="simulation"`. Its frame counter advances
 only after a completed control-period physics step. The action timestamp precedes
 integration; the successor's `simulation_state_ready_ns` must follow it. Repeated

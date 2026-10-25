@@ -43,6 +43,8 @@ class MujocoEnvCfg(EnvCfg):
     actuator_control_mode: Literal["torque", "position"] = "torque"
     policy_gyro_sensor: str | None = None
     policy_upvector_sensor: str | None = None
+    left_shoulder_load: bool = False
+    """Attach a rigid 3kg left-shoulder load on the first forward command."""
 
     visualize_extras: bool = True  # TODO: remove
 

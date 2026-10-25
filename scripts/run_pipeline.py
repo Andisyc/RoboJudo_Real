@@ -28,6 +28,10 @@ def parse_args():
         # RlPipeline: g1 | g1_beyondmimic | g1_asap | g1_real
         # RlLocoMimicPipeline: g1_locomimic_beyondmimic | g1_locomimic_asap | g1_real_loco_mimic
         help="Name of the config class to use",)
+    parser.add_argument(
+        "--left-shoulder-load", action="store_true",
+        help="G1 FADA MuJoCo only: attach 3kg at the left shoulder when forward motion starts.",
+    )
     
     args = parser.parse_args()
     return args
@@ -40,6 +44,11 @@ def main():
     # get cfg from register (Import-Time Registry)
     config_manager = ConfigManager(config_name=args.config)
     cfg: RlPipelineCfg = config_manager.get_cfg()
+    if args.left_shoulder_load:
+        if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
+                or cfg.robot != "g1" or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):
+            raise ValueError("--left-shoulder-load requires G1 FADA MuJoCo simulation")
+        cfg.env.left_shoulder_load = True
 
     # pipeline_type locate at pipeline_cfgs.py
     pipeline_type = cfg.pipeline_type

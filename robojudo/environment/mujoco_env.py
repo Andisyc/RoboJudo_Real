@@ -9,6 +9,7 @@ import numpy as np
 from robojudo.environment import Environment, env_registry
 from robojudo.environment.env_cfgs import MujocoEnvCfg
 from robojudo.environment.utils.mujoco_viz import MujocoVisualizer
+from robojudo.environment.utils.mujoco_payload import MujocoShoulderPayload
 from robojudo.utils.util_func import quat_rotate_inverse_np, quatToEuler
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,9 @@ class MujocoEnv(Environment):
         mujoco.mj_step(self.model, self.data)  # pyright: ignore[reportAttributeAccessIssue]
         self._simulation_frame_id = 0
         self._simulation_state_ready_ns = time.monotonic_ns()
+        self._shoulder_payload = MujocoShoulderPayload(
+            self.model, self.data, enabled=cfg_env.left_shoulder_load,
+        )
 
         self.viewer = mujoco_viewer.MujocoViewer(
             self.model,
@@ -103,6 +107,7 @@ class MujocoEnv(Environment):
         return np.asarray(self.data.sensordata[address : address + dimension], dtype=np.float32)
 
     def reborn(self, init_qpos=None):
+        self._shoulder_payload.reset()
         if init_qpos is not None:
             init_qpos = np.asarray(init_qpos, dtype=np.float64)
             if init_qpos.shape == self.data.qpos.shape:
@@ -126,6 +131,7 @@ class MujocoEnv(Environment):
         self.update()
 
     def reset(self):
+        self._shoulder_payload.reset()
         if self.reset_keyframe is not None:
             mujoco.mj_resetDataKeyframe(self.model, self.data, self.reset_keyframe)
             mujoco.mj_forward(self.model, self.data)
@@ -203,7 +209,7 @@ class MujocoEnv(Environment):
         env_data["sensor_read_started_ns"] = self._sensor_read_started_ns
         return env_data
 
-    def step(self, pd_target, hand_pose=None) -> int | None:
+    def step(self, pd_target, hand_pose=None, *, velocity_command=None) -> int | None:
         assert len(pd_target) == self.num_dofs, "pd_target len should be num_dofs of env"
         if not self.enabled:
             return None
@@ -211,8 +217,10 @@ class MujocoEnv(Environment):
         if hand_pose is not None:
             logger.info("Hand pose-->", hand_pose)
 
+        self._shoulder_payload.before_step(velocity_command)
         self.viewer.cam.lookat = self.data.qpos.astype(np.float32)[:3]
         if self.viewer.is_alive:
+            self._shoulder_payload.draw(self.viewer)
             self.viewer.render()
         if not self.enabled:
             return None

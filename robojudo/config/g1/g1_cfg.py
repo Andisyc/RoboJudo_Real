@@ -195,6 +195,7 @@ def _fada_comparison_policy(method: str) -> G1FADAPlannerIDMPolicyCfg:
 class g1_fada_baseline(g1_fada_planner_idm):
     """Frozen v024 reference in MuJoCo, without hardware or online learning."""
 
+    ctrl: List[KeyboardCtrlCfg] = [KeyboardCtrlCfg(backend="terminal")]
     policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("none")
 
 

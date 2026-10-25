@@ -592,6 +592,9 @@ For the frozen v024 MuJoCo baseline, run
 an environment with a graphical display. This profile disables online updates
 and does not initialize Unitree hardware. Do not use `start.sh` for simulation:
 it also starts the hardware DDS trajectory recorder.
+The profile explicitly reads keyboard input from the launching terminal, even
+when `DISPLAY` is set. Focus that terminal: press `w` to move forward at 0.6m/s
+or `x` to clear the velocity command; Enter is not required.
 
 Frozen FADA self-check/preparation retains observed state history without
 committing discarded predictions. Action history and last-action feedback

@@ -613,6 +613,10 @@ inference, with no physics advancement while waiting. The existing learner and
 optimizer are reused; CPU/CUDA selection and learning hyperparameters are unchanged.
 `x` zeros velocity but does not turn learning off. Reborn clears history, queued
 samples and the learning gate while retaining learned LoRA and optimizer state.
+Startup prints `[FADA LEARNER]` after the learner is ready. Each successfully
+applied weight version prints `[FADA UPDATE]` with its control step, sample count,
+loss and training duration. Rejected collection frames print `[FADA COLLECT]`
+with the reason, once per stage/reason in each episode to avoid flooding the console.
 Real-robot profiles retain `execution_mode="async"`; synchronous mode is rejected
 outside legacy FADA MuJoCo simulation before hardware initialization.
 No Unitree SDK controller or DDS participant is created. Rendering requires a

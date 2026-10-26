@@ -1,6 +1,7 @@
 """Standalone control-thread coordinator; official robot integration is separate."""
 from __future__ import annotations
 
+import logging
 import threading
 from collections import deque
 from numbers import Integral
@@ -13,6 +14,8 @@ from .online_collector import FADAExpertTrajectoryCollector, FADALegacyTrajector
 from .online_data import FADACausalWindow, FADAControlEvidence, FADAInferenceSnapshot
 from .online_runtime import FADATrainableRuntime
 from .online_worker import FADALearnerError, FADALearnerWorker
+
+logger = logging.getLogger(__name__)
 
 
 class FADAOnlineCoordinator:
@@ -57,6 +60,18 @@ class FADAOnlineCoordinator:
         self._closed = False
         self.failure: str | None = None
         self.last_update: dict | None = None
+        self._reported_rejections: set[tuple[str, str | None]] = set()
+
+    def _report_rejection(self, stage: str, result, evidence: FADAControlEvidence) -> None:
+        if result.accepted:
+            return
+        key = (stage, result.rejection_reason)
+        if key not in self._reported_rejections:
+            self._reported_rejections.add(key)
+            logger.warning(
+                "[FADA COLLECT] rejected stage=%s step=%d reason=%s",
+                stage, evidence.control_step, result.rejection_reason,
+            )
 
     def _check_owner(self) -> None:
         if threading.get_ident() != self._owner:
@@ -94,6 +109,10 @@ class FADAOnlineCoordinator:
         if self._stopping:
             raise FADALearnerError("stopped coordinator cannot be started")
         self.worker.start()
+        logger.info(
+            "[FADA LEARNER] ready method=%s mode=%s device=%s",
+            self.runtime.method, self.config.execution_mode, self.config.learner_device,
+        )
 
     def enable_updates(self, control_step: int) -> None:
         """Arm synchronous simulation learning without discarding recorded history."""
@@ -117,6 +136,7 @@ class FADAOnlineCoordinator:
         self._step = max(self._step, evidence.control_step)
         self._active = evidence.policy_control_active
         self._accepted_frame = result.accepted
+        self._report_rejection("observation", result, evidence)
         if isinstance(result.sample, FADACausalWindow):
             if self.config.execution_mode == "sync" and (
                 self._update_start_step is None
@@ -135,7 +155,9 @@ class FADAOnlineCoordinator:
             raise FADALearnerError("coordinator is stopping")
         if evidence.policy_version != self.policy_version:
             self._fail("issued snapshot policy_version does not match applied weights")
-        return self.collector.record_action(snapshot, evidence)
+        result = self.collector.record_action(snapshot, evidence)
+        self._report_rejection("action", result, evidence)
+        return result
 
     def try_submit(self):
         self._check_owner()
@@ -235,6 +257,11 @@ class FADAOnlineCoordinator:
             self._fail(f"full LoRA application failed; actor must not infer again: {error}")
         self.policy_version = result.learner_version
         self._publication = None
+        logger.info(
+            "[FADA UPDATE] version=%d step=%d samples=%d loss=%.6g train_s=%.3f",
+            self.policy_version, self._step, len(result.identity.sample_ids),
+            result.stats["loss"], result.duration_s,
+        )
         return True
 
     def reset(self, *, episode_id: int | None = None) -> None:
@@ -247,6 +274,7 @@ class FADAOnlineCoordinator:
         self.episode_id = int(new_episode)
         self.generation += 1
         self.collector.reset(episode_id=self.episode_id)
+        self._reported_rejections.clear()
         self._step = -1
         self._collection_start_step = None
         self._update_start_step = None

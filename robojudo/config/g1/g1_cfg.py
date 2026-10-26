@@ -178,13 +178,14 @@ class g1_real_fada_planner_idm(g1_fada_planner_idm):  # Sim2Real
     do_safety_check: bool = True
 
 
-def _fada_comparison_policy(method: str) -> G1FADAPlannerIDMPolicyCfg:
+def _fada_comparison_policy(method: str, *, execution_mode: str = "async") -> G1FADAPlannerIDMPolicyCfg:
     return G1FADAPlannerIDMPolicyCfg(
         policy_name="plaidm_v024_close_some_dr",
         checkpoint_filename="planner_idm_close_some_dr_v001.pt",
         gait_phase_enabled=True,
         online_adaptation=FADAOnlineAdaptationCfg(
             method=method,
+            execution_mode=execution_mode,
             # Initial receive-age limit: one 50 Hz control period, not a measured guarantee.
             max_sensor_age_s=0.02,
         ),
@@ -203,7 +204,7 @@ class g1_fada_baseline(g1_fada_planner_idm):
 class g1_fada_online(g1_fada_baseline):
     """Legacy streaming FADA in MuJoCo, without Unitree hardware."""
 
-    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("fada")
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("fada", execution_mode="sync")
 
 
 @cfg_registry.register

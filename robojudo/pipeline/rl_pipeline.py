@@ -191,6 +191,9 @@ class RlPipeline(Pipeline):
         try:
             prepared_policy = None
             if self.cfg.policy.policy_type == "FADAPlannerIDMPolicyAdapter":
+                if (self.cfg.policy.online_adaptation.execution_mode == "sync"
+                        and not (self.cfg.env.env_type == "MujocoEnv" and self.cfg.env.is_sim)):
+                    raise ValueError("synchronous FADA updates are only allowed in MuJoCo simulation")
                 policy_class = getattr(robojudo.policy, self.cfg.policy.policy_type)
                 prepared_policy = policy_class(cfg_policy=self.cfg.policy, device=self.device)
                 self._fada_adapter = prepared_policy

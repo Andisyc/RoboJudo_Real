@@ -403,10 +403,13 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             histories = self.playback_controller.prepare_query(candidate, self._pending_command)
             if self.online_coordinator is not None and self._control_active:
                 coordinator = self.online_coordinator
+                synchronous = coordinator.config.execution_mode == "sync"
                 if not self._adaptation_started and np.any(self._pending_command != 0.0):
                     self._adaptation_started = True
+                    if synchronous:
+                        coordinator.enable_updates(self._control_step)
                     logger.info(
-                        "FADA online collection triggered at control_step=%d command=%s",
+                        "FADA online updates triggered at control_step=%d command=%s",
                         self._control_step, self._pending_command.tolist(),
                     )
                 evidence = FADAControlEvidence(
@@ -415,16 +418,18 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                     policy_control_active=True, action_dispatched=False,
                     **self._pending_sensor,
                 )
-                if self._adaptation_started:
+                collect = synchronous or self._adaptation_started
+                if collect:
                     coordinator.observe(histories[0][:, -1], histories[2], evidence)
                     coordinator.apply_pending_at_step_boundary()
-                    coordinator.try_submit()
+                    if self._adaptation_started:
+                        coordinator.try_submit()
                 else:
                     coordinator.poll()
                 snapshot = coordinator.runtime.infer_with_snapshot(*histories)
                 self._pending_snapshot = snapshot
                 self._pending_evidence = replace(evidence, policy_version=coordinator.policy_version)
-                self._pending_collection = self._adaptation_started
+                self._pending_collection = collect
                 action_tensor = snapshot.action_snapshot
             else:
                 action_tensor = self._runtime["runner"].infer(*histories)

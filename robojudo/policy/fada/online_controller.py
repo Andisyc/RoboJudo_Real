@@ -49,6 +49,7 @@ class FADAOnlineCoordinator:
         self._publication = None
         self._step = -1
         self._collection_start_step: int | None = None
+        self._update_start_step: int | None = None
         self._active = False
         self._accepted_frame = False
         self._last_submitted = None
@@ -80,6 +81,7 @@ class FADAOnlineCoordinator:
             "episode_id": self.episode_id, "generation": self.generation,
             "control_step": self._step, "policy_version": self.policy_version,
             "collection_start_control_step": self._collection_start_step,
+            "update_start_control_step": self._update_start_step,
             "collection_step": (None if self._collection_start_step is None
                                 else self._step - self._collection_start_step),
             "pending_samples": pending, "inflight_samples": len(self._inflight),
@@ -92,6 +94,14 @@ class FADAOnlineCoordinator:
         if self._stopping:
             raise FADALearnerError("stopped coordinator cannot be started")
         self.worker.start()
+
+    def enable_updates(self, control_step: int) -> None:
+        """Arm synchronous simulation learning without discarding recorded history."""
+        self._check_owner()
+        if self._stopping:
+            raise FADALearnerError("coordinator is stopping")
+        if self._update_start_step is None:
+            self._update_start_step = control_step
 
     def observe(self, projected_state: torch.Tensor, command: torch.Tensor,
                 evidence: FADAControlEvidence):
@@ -108,6 +118,11 @@ class FADAOnlineCoordinator:
         self._active = evidence.policy_control_active
         self._accepted_frame = result.accepted
         if isinstance(result.sample, FADACausalWindow):
+            if self.config.execution_mode == "sync" and (
+                self._update_start_step is None
+                or result.sample.evidence.control_step < self._update_start_step
+            ):
+                return result
             if len(self._outbox) >= self.config.pending_capacity:
                 origin = (result.sample.evidence.episode_id, result.sample.evidence.control_step)
                 self._fail(f"legacy mature outbox full at sample {origin}; pending batches remain unacknowledged")
@@ -124,10 +139,12 @@ class FADAOnlineCoordinator:
 
     def try_submit(self):
         self._check_owner()
+        update_start = (self._update_start_step if self.config.execution_mode == "sync"
+                        else self._collection_start_step)
         if (self._stopping or not self._active or not self._accepted_frame
-                or self._collection_start_step is None):
+                or update_start is None):
             return None
-        collection_step = self._step - self._collection_start_step
+        collection_step = self._step - update_start
         if (collection_step <= 0 or collection_step % self.config.update_interval != 0
                 or self._last_submitted == (self.episode_id, self._step)):
             return None
@@ -154,6 +171,11 @@ class FADAOnlineCoordinator:
             if self.runtime.method == "fada":
                 self._outbox.clear()  # Ownership moved to this one in-flight batch, not consumed yet.
             self._last_submitted = (self.episode_id, self._step)
+            if self.config.execution_mode == "sync":
+                if not self.worker.wait_for_message(self.config.update_timeout_s):
+                    self._fail(f"synchronous learner update timed out for job {job.identity.job_id}")
+                if not self.apply_pending_at_step_boundary():
+                    self._fail("synchronous learner update did not publish an applicable version")
         return job
 
     def poll(self):
@@ -227,6 +249,9 @@ class FADAOnlineCoordinator:
         self.collector.reset(episode_id=self.episode_id)
         self._step = -1
         self._collection_start_step = None
+        self._update_start_step = None
+        if self.config.execution_mode == "sync":
+            self._outbox.clear()
         self._active = False
         self._accepted_frame = False
         # Keep outbox, accepted job, staged result and the worker's optimizer/anchor.

@@ -604,11 +604,19 @@ For legacy FADA online updates in MuJoCo, use the same environment and checkpoin
 python scripts/run_pipeline.py -c g1_fada_online
 ```
 
-This entry starts with zero velocity and no learning; a nonzero terminal velocity
-command triggers collection and background LoRA updates. `x` zeros velocity but
-does not turn learning off; reborn closes the velocity gate again. No Unitree SDK
-controller or DDS participant is created. Rendering requires a graphical display;
-do not use `start.sh` or unset `DISPLAY`.
+This entry uses `online_adaptation.execution_mode="sync"`: it records bounded
+observation/action history while standing, without training or accumulating a
+training batch. The first nonzero terminal velocity command enables learning;
+only windows whose supervised action starts at or after that command are trained.
+Each submitted update completes and its LoRA weights are applied before the next
+inference, with no physics advancement while waiting. The existing learner and
+optimizer are reused; CPU/CUDA selection and learning hyperparameters are unchanged.
+`x` zeros velocity but does not turn learning off. Reborn clears history, queued
+samples and the learning gate while retaining learned LoRA and optimizer state.
+Real-robot profiles retain `execution_mode="async"`; synchronous mode is rejected
+outside legacy FADA MuJoCo simulation before hardware initialization.
+No Unitree SDK controller or DDS participant is created. Rendering requires a
+graphical display; do not use `start.sh` or unset `DISPLAY`.
 
 Add `--left-shoulder-load` to enable a forward-triggered 3kg payload:
 

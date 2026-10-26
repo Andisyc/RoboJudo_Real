@@ -266,7 +266,7 @@ class FADALearnerWorker:
                 return
 
     def wait_for_message(self, timeout: float) -> bool:
-        """Offline/lifecycle wait only. Control paths must use poll instead."""
+        """Bounded lifecycle/offline/synchronous-simulation wait; hardware paths must poll."""
         if self._received is not None:
             return True
         try:

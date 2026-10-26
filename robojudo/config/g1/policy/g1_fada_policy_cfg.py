@@ -14,6 +14,7 @@ from .g1_unilab_policy_cfg import G1UniLabDistillDoF, G1UniLabPolicyCfg
 
 class FADAOnlineAdaptationCfg(Config):
     method: Literal["none", "fada", "expert_difference"] = "none"
+    execution_mode: Literal["async", "sync"] = "async"
     lora_rank: int = Field(default=8, gt=0, strict=True)
     lora_alpha: float = Field(default=16.0, gt=0.0, allow_inf_nan=False)
     lora_dropout: float = Field(default=0.05, ge=0.0, lt=1.0, allow_inf_nan=False)
@@ -35,6 +36,8 @@ class FADAOnlineAdaptationCfg(Config):
 
     @model_validator(mode="after")
     def check_legacy_capacity(self):
+        if self.execution_mode == "sync" and self.method != "fada":
+            raise ValueError("synchronous updates require the legacy FADA method")
         if self.method == "fada" and self.pending_capacity < self.update_interval:
             raise ValueError("legacy pending_capacity must cover at least one update_interval")
         return self

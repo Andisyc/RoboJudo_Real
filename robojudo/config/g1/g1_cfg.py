@@ -213,17 +213,37 @@ class g1_fada_online(g1_fada_baseline):
 
 
 @cfg_registry.register
+class g1_fada_online_async(g1_fada_online):
+    """Legacy FADA MuJoCo comparison using the real-robot asynchronous schedule."""
+
+    run_fullspeed: bool = False
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy(
+        "fada", execution_mode="async", forward_speed=0.4,
+    )
+
+
+@cfg_registry.register
+class g1_fada_expert_online_async(g1_fada_baseline):
+    """Frozen-base trajectory-difference adaptation in paced MuJoCo simulation."""
+
+    run_fullspeed: bool = False
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy(
+        "expert_difference", execution_mode="async", forward_speed=0.4,
+    )
+
+
+@cfg_registry.register
 class g1_real_fada_baseline(g1_real_fada_planner_idm):
     """Frozen paired-PT reference for the streaming comparisons."""
 
-    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("none")
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("none", forward_speed=0.4)
 
 
 @cfg_registry.register
 class g1_real_fada_online(g1_real_fada_planner_idm):
     """Legacy streaming FADA using the same paired PT as the reference."""
 
-    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("fada")
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("fada", forward_speed=0.4)
 
 
 @cfg_registry.register

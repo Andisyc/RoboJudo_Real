@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import sys
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 import functools
 import time
 import tempfile
@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from robojudo.config.g1.g1_cfg import g1_real_fada_planner_idm
+from robojudo.config.config_manager import ConfigManager
 from robojudo.config.g1.policy.g1_fada_policy_cfg import (
     FADAOnlineAdaptationCfg, G1FADAPlannerIDMPolicyCfg,
 )
@@ -928,6 +929,190 @@ class TestFADAOnlineWorker(unittest.TestCase):
             ))
         return runtime, cfg
 
+    def test_legacy_gate_matches_modes_and_holds_late_publication(self):
+        class Frame(SimpleNamespace):
+            def get(self, name, default=None):
+                return getattr(self, name, default)
+
+        profiles = ("g1_fada_online", "g1_fada_online_async", "g1_real_fada_online")
+        registered = {name: ConfigManager(name).get_cfg() for name in profiles}
+        settings = registered["g1_fada_online"].policy.online_adaptation.model_dump(
+            exclude={"execution_mode"},
+        )
+        for name, config in registered.items():
+            self.assertEqual(config.policy.keyboard_command_magnitudes[0], 0.4)
+            self.assertEqual(config.policy.online_adaptation.execution_mode,
+                             "sync" if name == "g1_fada_online" else "async")
+            self.assertEqual(
+                config.policy.online_adaptation.model_dump(exclude={"execution_mode"}), settings,
+            )
+        self.assertFalse(registered["g1_fada_online_async"].run_fullspeed)
+        for name in ("g1_fada_baseline", "g1_real_fada_baseline"):
+            baseline = ConfigManager(name).get_cfg()
+            self.assertEqual(baseline.policy.keyboard_command_magnitudes[0], 0.4)
+            self.assertEqual(baseline.policy.online_adaptation.method, "none")
+        traces = {}
+        for profile in profiles:
+            mode = registered[profile].policy.online_adaptation.execution_mode
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory, torch.random.fork_rng():
+                torch.manual_seed(119)
+                checkpoint = Path(directory) / "paired.pt"
+                _write_checkpoint(checkpoint)
+                cfg = registered[profile].policy.model_copy(deep=True)
+                cfg.checkpoint_path = str(checkpoint)
+                cfg.online_adaptation = cfg.online_adaptation.model_copy(update={
+                    "lora_rank": 2, "lora_alpha": 4.0, "lora_dropout": 0.0,
+                    "learning_rate": 0.01, "max_sensor_age_s": 0.01,
+                })
+                adapter = FADAPlannerIDMPolicyAdapter(cfg, "cpu")
+                coordinator = adapter.online_coordinator
+                context = coordinator.worker._context
+                entered, release = context.Event(), context.Event()
+                if mode == "sync":
+                    release.set()
+                target = functools.partial(_controlled_fada_learner, entered=entered, release=release)
+                data = Frame(
+                    policy_gyro=np.zeros(3, dtype=np.float32),
+                    policy_gravity=np.array([0., 0., -1.], dtype=np.float32),
+                    dof_vel=np.zeros(29, dtype=np.float32),
+                    source="simulation" if registered[profile].env.is_sim else "hardware",
+                )
+                jobs = []
+                submit = coordinator.worker.submit
+                tick = 0
+
+                def record_job(samples, **identity):
+                    job = submit(samples, **identity)
+                    if job is not None:
+                        jobs.append(job)
+                    return job
+
+                def frame(key=None):
+                    nonlocal tick
+                    data.dof_pos = adapter.default_dof_pos + 0.01 * np.sin(
+                        tick * 0.1 + np.arange(29, dtype=np.float32)
+                    )
+                    data.sensor_read_started_ns = 1_000_000_000 + tick * 20_000_000
+                    if data.source == "simulation":
+                        data.simulation_frame_id = tick
+                        data.simulation_state_ready_ns = data.sensor_read_started_ns - 1
+                    else:
+                        data.sensor_tick = tick
+                        data.torso_imu_sequence = tick + 1
+                        data.lowstate_age_s = data.torso_imu_age_s = 0.001
+                    events = [] if key is None else [
+                        {"type": "keyboard", "name": key, "pressed": True}
+                    ]
+                    obs, _ = adapter.get_observation(data, {"KeyboardCtrl": {"keyboard_event": events}})
+                    adapter.get_action(obs)
+                    snapshot = adapter._pending_snapshot
+                    adapter.confirm_action_submission(data.sensor_read_started_ns + 1_000_000)
+                    adapter.post_step_callback([])
+                    tick += 1
+                    return snapshot
+
+                if mode == "async":
+                    reference = _restore_runtime(coordinator.worker._initial, "cpu")
+                    reference_updater = FADALegacyUpdater(reference, lr=cfg.online_adaptation.learning_rate)
+                try:
+                    with patch("robojudo.policy.fada.online_worker._learner_main", target):
+                        adapter.start_online()
+                    adapter.set_control_active(True)
+                    before = {n: p.detach().clone() for n, p in fada_adapter_named_parameters(coordinator.runtime.policy)}
+                    frozen = {n: p.detach().clone() for n, p in coordinator.runtime.policy.named_parameters()
+                              if not p.requires_grad}
+                    no_wait = (patch.object(coordinator.worker, "wait_for_message",
+                                            side_effect=AssertionError("async control must not wait"))
+                               if mode == "async" else nullcontext())
+                    with patch.object(coordinator.worker, "submit", side_effect=record_job), no_wait:
+                        for _ in range(80):
+                            frame()
+                        self.assertEqual(coordinator.status["collection_start_control_step"], 0)
+                        self.assertEqual(coordinator.status["pending_samples"], 0)
+                        self.assertIsNone(coordinator.worker.pending_job)
+                        self.assertEqual(coordinator.policy_version, 0)
+                        for name, parameter in fada_adapter_named_parameters(coordinator.runtime.policy):
+                            torch.testing.assert_close(parameter, before[name], rtol=0, atol=0)
+                        for step in range(80, 120):
+                            probe = frame("w" if step == 80 else None)
+                    self.assertEqual(coordinator.status["update_start_control_step"], 80)
+                    self.assertEqual(jobs[0].identity.control_step, 90)
+                    self.assertEqual(jobs[0].identity.sample_ids, tuple((0, t) for t in range(80, 85)))
+                    ids = [identity for job in jobs for identity in job.identity.sample_ids]
+                    ids.extend((s.evidence.episode_id, s.evidence.control_step) for s in coordinator._outbox)
+                    self.assertEqual(sorted(ids), [(0, t) for t in range(80, 114)])
+                    traces[profile] = sorted(ids)
+                    if mode == "async":
+                        self.assertTrue(entered.wait(timeout=10))
+                        self.assertEqual(coordinator.policy_version, 0)
+                        probe_before = coordinator.runtime.infer(
+                            probe.observation_history, probe.action_history, probe.command,
+                        ).clone()
+                        pending = coordinator.worker.pending_job.identity
+                        pid = coordinator.worker.process.pid
+                        adapter.reset()
+                        self.assertEqual(coordinator.status["pending_samples"], 0)
+                        self.assertEqual(coordinator.worker.pending_job.identity, pending)
+                        adapter.set_control_active(True)
+                        release.set()
+                        result1 = self.completion(coordinator)
+                        self.reference_step(reference, reference_updater, jobs[0], cfg.online_adaptation, result1)
+                        for _ in range(80):
+                            frame()
+                        self.assertIsNotNone(coordinator._publication)
+                        self.assertEqual(coordinator.policy_version, 0)
+                        for name, parameter in fada_adapter_named_parameters(coordinator.runtime.policy):
+                            torch.testing.assert_close(parameter, before[name], rtol=0, atol=0)
+                        frame("w")
+                        self.assertEqual(coordinator.policy_version, 1)
+                        probe_after = coordinator.runtime.infer(
+                            probe.observation_history, probe.action_history, probe.command,
+                        )
+                        self.assertFalse(torch.equal(probe_before, probe_after))
+                        with patch.object(coordinator.worker, "submit", side_effect=record_job), \
+                                patch.object(coordinator.worker, "wait_for_message",
+                                             side_effect=AssertionError("async control must not wait")):
+                            for _ in range(10):
+                                frame()
+                        self.assertEqual(len(jobs), 2)
+                        self.assertEqual(jobs[1].identity.episode_id, coordinator.episode_id)
+                        self.assertEqual(jobs[1].identity.sample_ids,
+                                         tuple((coordinator.episode_id, t) for t in range(80, 85)))
+                        result2 = self.completion(coordinator)
+                        self.reference_step(reference, reference_updater, jobs[1], cfg.online_adaptation, result2)
+                        self.assertTrue(coordinator.apply_pending_at_step_boundary())
+                        self.assertEqual(coordinator.policy_version, 2)
+                        self.assertEqual(coordinator.worker.process.pid, pid)
+                    else:
+                        self.assertGreater(coordinator.policy_version, 0)
+                        frame("x")
+                        self.assertTrue(adapter._adaptation_started)
+                        self.assertEqual(coordinator.status["update_start_control_step"], 80)
+                        for _ in range(8):
+                            frame()
+                        self.assertEqual(
+                            [(s.evidence.episode_id, s.evidence.control_step) for s in coordinator._outbox],
+                            [(0, t) for t in range(120, 123)],
+                        )
+                        weights = {n: p.detach().clone() for n, p in fada_adapter_named_parameters(coordinator.runtime.policy)}
+                        version = coordinator.policy_version
+                        adapter.reset()
+                        self.assertEqual(coordinator.status["pending_samples"], 0)
+                        self.assertEqual(coordinator.policy_version, version)
+                        for name, parameter in fada_adapter_named_parameters(coordinator.runtime.policy):
+                            torch.testing.assert_close(parameter, weights[name], rtol=0, atol=0)
+                    for name, parameter in coordinator.runtime.policy.named_parameters():
+                        if name in frozen:
+                            torch.testing.assert_close(parameter, frozen[name], rtol=0, atol=0)
+                    print("LEGACY_GATE_SMOKE", profile, "standing=80", "first_submit=90",
+                          "first_anchors=80..84", "reset_clears_unsubmitted=True",
+                          "late_result_and_adam_preserved=True" if mode == "async" else "sync_weights_preserved=True")
+                finally:
+                    release.set()
+                    adapter.close()
+        self.assertEqual(traces["g1_fada_online"], traces["g1_fada_online_async"])
+        self.assertEqual(traces["g1_fada_online"], traces["g1_real_fada_online"])
+
     def event(self, coordinator, step):
         episode = coordinator.episode_id
         config = coordinator.runtime.policy.config
@@ -942,6 +1127,8 @@ class TestFADAOnlineWorker(unittest.TestCase):
         evidence = TestFADACausalCollectors.evidence(
             step, episode=episode, policy_version=coordinator.policy_version,
         )
+        if coordinator.runtime.method == "fada":
+            coordinator.enable_updates(step)
         collected = coordinator.observe(state, command, evidence)
         self.assertTrue(collected.accepted, collected.rejection_reason)
         job = coordinator.try_submit()
@@ -1047,7 +1234,7 @@ class TestFADAOnlineWorker(unittest.TestCase):
                 for step in range(51, 57):
                     self.event(coordinator, step)
                 coordinator.reset()
-                self.assertEqual(coordinator.status["pending_samples"], 6 if method == "fada" else 0)
+                self.assertEqual(coordinator.status["pending_samples"], 0)
                 self.assertFalse(coordinator.apply_pending_at_step_boundary())
                 for step in range(7):
                     self.event(coordinator, step)
@@ -1242,7 +1429,7 @@ def _fada_sdk_modules(sdk):
 
 
 @contextmanager
-def _fada_deployment_harness():
+def _fada_deployment_harness(*, include_simulation=False):
     """Real Python deployment owners with a test-only SDK/sensor/actuator boundary."""
     import robojudo.environment as environments
     import robojudo.policy as policies
@@ -1369,7 +1556,39 @@ def _fada_deployment_harness():
                 patch.dict(policies.__dict__, {"FADAPlannerIDMPolicyAdapter": ObservedAdapter}), \
                 patch.object(pipeline_module, "CtrlManager", Commands), \
                 patch.object(pipeline_module, "time", fast_prepare), \
-                patch.object(native_module, "time", clocks):
+                patch.object(native_module, "time", clocks), ExitStack() as simulation_scope:
+            if include_simulation:
+                class HeadlessViewer:
+                    def __init__(self, *args, **kwargs):
+                        self.is_alive = True
+                        self.cam = SimpleNamespace(lookat=np.zeros(3))
+
+                    def render(self):
+                        pass
+
+                    def add_marker(self, **kwargs):
+                        pass
+
+                    def close(self):
+                        self.is_alive = False
+
+                viewer_name = "mujoco_viewer"
+                if viewer_name not in sys.modules:
+                    viewer = ModuleType(viewer_name)
+                    viewer.MujocoViewer = HeadlessViewer
+                    sys.modules[viewer_name] = viewer
+                    simulation_scope.callback(sys.modules.pop, viewer_name, None)
+                module_name = "robojudo.environment.mujoco_env"
+                already_loaded = module_name in sys.modules
+                simulation = importlib.import_module(module_name)
+                if not already_loaded:
+                    simulation_scope.callback(sys.modules.pop, module_name, None)
+                simulation_scope.enter_context(
+                    patch.object(simulation.mujoco_viewer, "MujocoViewer", HeadlessViewer)
+                )
+                simulation_scope.enter_context(
+                    patch.dict(environments.__dict__, {"MujocoEnv": simulation.MujocoEnv})
+                )
             yield SimpleNamespace(
                 Pipeline=pipeline_module.RlPipeline, Env=SensorsAndActuator,
                 Commands=Commands, Adapter=ObservedAdapter, native=native_module,
@@ -1605,14 +1824,17 @@ class TestFADADeploymentIntegration(unittest.TestCase):
             self.assertFalse(pipeline.policy.online_coordinator.worker._receiver.is_alive())
 
     def test_registered_comparison_profiles_run_through_main(self):
-        import robojudo.pipeline as pipelines
-        from robojudo.config.config_manager import ConfigManager
+        self._exercise_registered_profiles((
+            "g1_fada_baseline", "g1_fada_online", "g1_fada_online_async",
+            "g1_real_fada_baseline", "g1_real_fada_online",
+        ))
 
-        profiles = (
-            ("g1_real_fada_baseline", "none"),
-            ("g1_real_fada_online", "fada"),
-            ("g1_real_fada_expert_online", "expert_difference"),
-        )
+    def test_registered_expert_simulation_with_payload_runs_through_main(self):
+        self._exercise_registered_profiles(("g1_fada_expert_online_async",), payload=True)
+
+    def _exercise_registered_profiles(self, profiles, *, payload=False):
+        import robojudo.pipeline as pipelines
+
         with tempfile.TemporaryDirectory() as directory, torch.random.fork_rng():
             torch.manual_seed(102)
             checkpoint = Path(directory) / "paired.pt"
@@ -1622,151 +1844,277 @@ class TestFADADeploymentIntegration(unittest.TestCase):
             def offline_cfg(manager):
                 cfg = original_get_cfg(manager)
                 cfg.device = "cpu"
-                cfg.run_fullspeed = True
                 cfg.debug.log_obs = False
                 cfg.env.forward_kinematic = None
+                if cfg.env.is_sim:
+                    cfg.env.visualize_extras = False
                 cfg.policy.checkpoint_path = str(checkpoint)
-                cfg.policy.online_adaptation.max_sensor_age_s = 0.01
                 return cfg
 
             path = Path(__file__).parents[1] / "scripts" / "run_pipeline.py"
             spec = importlib.util.spec_from_file_location("_fada_registered_entry_smoke", path)
             entry = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(entry)
-            for profile, method in profiles:
-                with self.subTest(profile=profile), _fada_deployment_harness() as h:
+            for profile in profiles:
+                with self.subTest(profile=profile), _fada_deployment_harness(include_simulation=True) as h:
                     captured = []
                     case = self
-                    waiting_steps = 53
-                    completion_step = waiting_steps + 41
-                    reset_waiting_steps = 12
-                    retrigger_step = completion_step + reset_waiting_steps + 1
-                    stop_step = retrigger_step + 2
+                    gates = []
 
                     class SmokePipeline(h.Pipeline):
                         def __init__(self, **kwargs):
                             self.smoke_active = False
                             self.smoke_steps = 0
-                            super().__init__(**kwargs)
+                            self.phase = "standing"
+                            self.phase_steps = 0
+                            self.jobs = []
+                            self.reset_seen = False
+                            cfg = kwargs["cfg"]
+                            self.expert = cfg.policy.online_adaptation.method == "expert_difference"
+                            self.snapshots, self.states = {}, {}
+                            self.asynchronous = cfg.policy.online_adaptation.execution_mode == "async"
+                            if cfg.policy.online_adaptation.method != "none":
+                                import multiprocessing
+                                context = multiprocessing.get_context("spawn")
+                                self.entered, self.release = context.Event(), context.Event()
+                                gates.append(self.release)
+                                self.release.set()
+                                target = functools.partial(
+                                    _controlled_fada_learner, entered=self.entered, release=self.release,
+                                )
+                                with patch("robojudo.policy.fada.online_worker._learner_main", target):
+                                    super().__init__(**kwargs)
+                            else:
+                                super().__init__(**kwargs)
                             captured.append(self)
+                            self.smoke_active = cfg.env.is_sim
+                            self.deadline = time.monotonic() + 20
                             adapter = self.policy.policy
-                            self.probe = (torch.zeros(1, 30, 66), torch.zeros(1, 30, 29),
-                                          torch.zeros(1, 3))
+                            self.probe = (torch.zeros(1, 30, 66), torch.zeros(1, 30, 29), torch.zeros(1, 3))
                             self.before_output = adapter._runtime["runner"].infer(*self.probe).clone()
+                            self.before_weights = self.weights()
+                            self.body_id = self.env.model.body("torso_link").id if payload else None
+                            self.nominal_mass = float(self.env.model.body_mass[self.body_id]) if payload else None
                             model = adapter._runtime["model"]
-                            parameters = (model.named_parameters() if method == "none"
+                            self.frozen = {n: p.detach().clone() for n, p in model.named_parameters()
+                                           if not p.requires_grad}
+                            base = adapter._runtime["runner"].base_idm if self.expert else None
+                            self.base_weights = None if base is None else {
+                                n: v.clone() for n, v in base.state_dict().items()
+                            }
+                            coordinator = adapter.online_coordinator
+                            if coordinator is not None:
+                                self.learner_pid = coordinator.worker.process.pid
+                                submit = coordinator.worker.submit
+                                if self.expert:
+                                    observe = coordinator.observe
+
+                                    def record_state(state, command, evidence):
+                                        self.states[(evidence.episode_id, evidence.control_step)] = state.clone()
+                                        return observe(state, command, evidence)
+
+                                    self.observe_patch = patch.object(coordinator, "observe", side_effect=record_state)
+                                    self.observe_patch.start()
+
+                                def record_job(samples, **identity):
+                                    if self.expert:
+                                        for pair in samples:
+                                            origin = pair.evidence
+                                            expected = self.snapshots[(origin.episode_id, origin.control_step)]
+                                            torch.testing.assert_close(pair.snapshot.nominal_future,
+                                                                       expected.nominal_future, rtol=0, atol=0)
+                                            torch.testing.assert_close(pair.snapshot.action_snapshot,
+                                                                       expected.action_snapshot, rtol=0, atol=0)
+                                            future = torch.stack([
+                                                self.states[(origin.episode_id, origin.control_step + i)]
+                                                for i in range(1, cfg.policy.prediction_horizon + 1)
+                                            ], dim=1)
+                                            torch.testing.assert_close(pair.realized_future, future, rtol=0, atol=0)
+                                    job = submit(samples, **identity)
+                                    if job is not None:
+                                        self.jobs.append(job)
+                                    return job
+
+                                self.submit_patch = patch.object(coordinator.worker, "submit", side_effect=record_job)
+                                self.submit_patch.start()
+
+                        def weights(self):
+                            adapter = self.policy.policy
+                            model = adapter._runtime["model"]
+                            parameters = (model.named_parameters() if adapter.online_coordinator is None
                                           else fada_adapter_named_parameters(model))
-                            self.before_weights = {n: p.detach().clone() for n, p in parameters}
+                            return {n: p.detach().clone() for n, p in parameters}
 
                         def prepare(self):
                             super().prepare()
+                            coordinator = self.policy.online_coordinator
+                            if coordinator is not None:
+                                case.assertIsNone(coordinator.worker.pending_job)
+                                case.assertEqual(coordinator.worker.learner_version, 0)
+                                case.assertEqual(coordinator.status["pending_samples"], 0)
+                                case.assertIsNone(coordinator.collector._pending)
                             self.smoke_active = True
 
                         def step(self, dry_run=False):
-                            next_step = self.smoke_steps + 1
-                            if self.smoke_active and not dry_run and method != "none":
-                                if next_step in (waiting_steps + 1, retrigger_step):
-                                    self.ctrl_manager.press("w" if next_step == waiting_steps + 1 else "s")
-                                elif next_step == retrigger_step + 1:
+                            active = self.smoke_active and not dry_run
+                            if active:
+                                case.assertLess(time.monotonic(), self.deadline, self.phase)
+                                if self.phase in ("moving", "relearning") and self.phase_steps == 0:
+                                    self.ctrl_manager.press("w")
+                                elif self.phase == "stopping":
                                     self.ctrl_manager.press("x")
-                            super().step(dry_run=dry_run)
-                            if not self.smoke_active or dry_run:
+                            coordinator = self.policy.online_coordinator
+                            no_wait = (patch.object(coordinator.worker, "wait_for_message",
+                                                   side_effect=AssertionError("async control must not wait"))
+                                       if active and coordinator is not None and self.asynchronous else nullcontext())
+                            physics_before = self.env.data.time if active and self.cfg.env.is_sim else None
+                            with no_wait:
+                                super().step(dry_run=dry_run)
+                            if not active:
                                 return
+                            if physics_before is not None:
+                                case.assertAlmostEqual(self.env.data.time - physics_before, self.dt, places=8)
                             self.smoke_steps += 1
+                            self.phase_steps += 1
                             adapter = self.policy.policy
-                            coordinator = adapter.online_coordinator
-                            model = adapter._runtime["model"]
-                            if method == "none":
-                                case.assertIsNone(coordinator)
-                                if self.smoke_steps == 42:
-                                    for name, parameter in model.named_parameters():
-                                        torch.testing.assert_close(parameter, self.before_weights[name],
-                                                                   rtol=0, atol=0)
+                            if coordinator is None:
+                                if self.phase_steps == 1:
+                                    self.ctrl_manager.press("w")
+                                if self.phase_steps == 12:
+                                    for name, value in self.weights().items():
+                                        torch.testing.assert_close(value, self.before_weights[name], rtol=0, atol=0)
+                                    torch.testing.assert_close(adapter._runtime["runner"].infer(*self.probe),
+                                                               self.before_output, rtol=0, atol=0)
                                     self.request_stop()
                                 return
-
-                            if self.smoke_steps <= waiting_steps:
-                                case.assertFalse(adapter._adaptation_started)
-                                case.assertIsNone(coordinator.status["collection_step"])
-                                case.assertIsNone(coordinator.worker.pending_job)
+                            if payload:
+                                expected_mass = self.nominal_mass + (3.0 if adapter._adaptation_started else 0.0)
+                                case.assertAlmostEqual(float(self.env.model.body_mass[self.body_id]), expected_mass)
+                            if self.expert and not adapter._adaptation_started:
                                 case.assertIsNone(coordinator.collector._pending)
-                                case.assertEqual(coordinator.status["pending_samples"], 0)
-                                case.assertEqual(coordinator.worker.learner_version, 0)
-                                case.assertEqual(adapter._control_step, self.smoke_steps)
-                                torch.testing.assert_close(adapter.playback_controller._action_history[0, -1],
-                                                           torch.from_numpy(adapter.last_action))
-                                if self.smoke_steps == waiting_steps:
-                                    self.waiting_history = adapter.playback_controller._action_history.clone()
-                                    for name, parameter in fada_adapter_named_parameters(model):
-                                        torch.testing.assert_close(parameter, self.before_weights[name],
-                                                                   rtol=0, atol=0)
-                            elif self.smoke_steps == waiting_steps + 1:
-                                case.assertTrue(adapter._adaptation_started)
-                                case.assertEqual(coordinator.status["collection_start_control_step"], waiting_steps)
-                                case.assertEqual(coordinator.status["collection_step"], 0)
-                                torch.testing.assert_close(coordinator.collector._pending.snapshot.action_history,
-                                                           self.waiting_history, rtol=0, atol=0)
-                            elif self.smoke_steps < completion_step:
-                                case.assertIsNone(coordinator.worker.pending_job)
-                                case.assertEqual(coordinator.worker.learner_version, 0)
-                            elif self.smoke_steps == completion_step:
-                                case.assertEqual(coordinator.runtime.method, method)
-                                case.assertEqual(coordinator.status["collection_step"], 40)
-                                case.assertEqual(coordinator.worker.pending_job.identity.control_step,
-                                                 waiting_steps + 40)
-                                case.assertTrue(coordinator.worker.wait_for_message(10))
-                                case.assertIsNotNone(coordinator.poll())
-                                case.assertEqual(coordinator.policy_version, 0)
-                                case.assertTrue(coordinator.status["publication_pending"])
-                                self.learner_pid = coordinator.worker.process.pid
-                                generation = coordinator.generation
-                                self.reset()
-                                case.assertEqual(coordinator.generation, generation + 1)
-                                case.assertFalse(adapter._adaptation_started)
-                                case.assertIsNone(coordinator.status["collection_step"])
-                            elif self.smoke_steps < retrigger_step:
-                                case.assertFalse(adapter._adaptation_started)
-                                case.assertIsNone(coordinator.status["collection_step"])
-                                case.assertEqual(coordinator.policy_version, 0)
-                                case.assertTrue(coordinator.status["publication_pending"])
-                                case.assertEqual(coordinator.worker.process.pid, self.learner_pid)
-                                for name, parameter in fada_adapter_named_parameters(model):
-                                    torch.testing.assert_close(parameter, self.before_weights[name],
-                                                               rtol=0, atol=0)
                             else:
+                                case.assertIsNotNone(coordinator.collector._pending)
+                                issued = coordinator.collector._pending
+                                self.snapshots[(issued.evidence.episode_id, issued.evidence.control_step)] = issued.snapshot
+                            case.assertIsNone(adapter._pending_snapshot)
+                            if coordinator.collector._pending is not None:
+                                case.assertTrue(coordinator.collector._pending.evidence.action_dispatched)
+                                case.assertEqual(coordinator.collector._pending.evidence.policy_version,
+                                                 coordinator.policy_version)
+                            case.assertEqual(coordinator.worker.process.pid, self.learner_pid)
+                            if self.phase in ("standing", "reset_standing"):
+                                case.assertFalse(adapter._adaptation_started)
+                                case.assertIsNone(coordinator.status["update_start_control_step"])
+                                case.assertEqual(coordinator.status["pending_samples"], 0)
+                                reference = self.reset_weights if self.reset_seen else self.before_weights
+                                for name, value in self.weights().items():
+                                    torch.testing.assert_close(value, reference[name], rtol=0, atol=0)
+                                if self.phase_steps == 53:
+                                    if self.reset_seen and self.asynchronous:
+                                        case.assertTrue(coordinator.status["publication_pending"])
+                                    self.phase = "relearning" if self.reset_seen else "moving"
+                                    self.phase_steps = 0
+                            elif self.phase == "moving":
+                                np.testing.assert_allclose(adapter._keyboard_command, [0.4, 0., 0.])
+                                if self.jobs:
+                                    first = self.jobs[0].identity
+                                    if self.expert:
+                                        case.assertEqual(first.control_step, 53 + self.cfg.policy.online_adaptation.warmup_steps)
+                                        start = first.control_step - self.cfg.policy.prediction_horizon - 9
+                                        case.assertEqual(first.sample_ids,
+                                                         tuple((coordinator.episode_id, t) for t in range(start, start + 10)))
+                                    else:
+                                        case.assertEqual(first.sample_ids,
+                                                         tuple((coordinator.episode_id, t) for t in range(53, 58)))
+                                if coordinator.policy_version > 0 and not hasattr(self, "first_applied_step"):
+                                    case.assertFalse(torch.equal(adapter._runtime["runner"].infer(*self.probe),
+                                                                 self.before_output))
+                                    self.first_applied_step = self.smoke_steps
+                                    if self.asynchronous:
+                                        self.release.clear()
+                                        self.entered.clear()
+                                pending_samples = coordinator.status["pending_samples"]
+                                ready = (hasattr(self, "first_applied_step") and pending_samples >= 3)
+                                if ready and (not self.asynchronous or self.entered.is_set()):
+                                    self.reset_weights = self.weights()
+                                    self.reset_version = coordinator.policy_version
+                                    self.reset_probe = adapter._runtime["runner"].infer(*self.probe).clone()
+                                    pending = coordinator.worker.pending_job
+                                    if self.asynchronous:
+                                        case.assertIsNotNone(pending)
+                                    generation = coordinator.generation
+                                    self.reset()
+                                    case.assertEqual(coordinator.generation, generation + 1)
+                                    case.assertEqual(coordinator.status["pending_samples"], 0)
+                                    case.assertIs(coordinator.worker.pending_job, pending)
+                                    if payload:
+                                        case.assertAlmostEqual(float(self.env.model.body_mass[self.body_id]), self.nominal_mass)
+                                    self.reset_episode = coordinator.episode_id
+                                    self.reset_seen = True
+                                    self.release.set()
+                                    self.phase, self.phase_steps = "reset_standing", 0
+                            elif self.phase == "relearning":
+                                if self.phase_steps == 1 and self.asynchronous:
+                                    case.assertEqual(coordinator.policy_version, self.reset_version + 1)
+                                new_jobs = [job for job in self.jobs if job.identity.episode_id == self.reset_episode]
+                                for job in new_jobs:
+                                    case.assertTrue(all(ep == self.reset_episode and step >= 53
+                                                        for ep, step in job.identity.sample_ids))
+                                target = self.reset_version + (2 if self.asynchronous else 1)
+                                if new_jobs and coordinator.policy_version >= target:
+                                    case.assertFalse(torch.equal(adapter._runtime["runner"].infer(*self.probe),
+                                                                 self.reset_probe))
+                                    self.phase, self.phase_steps = "stopping", 0
+                            else:
+                                np.testing.assert_array_equal(adapter._keyboard_command, np.zeros(3))
+                                for name, parameter in adapter._runtime["model"].named_parameters():
+                                    if name in self.frozen:
+                                        torch.testing.assert_close(parameter, self.frozen[name], rtol=0, atol=0)
+                                if self.expert:
+                                    for name, value in coordinator.runtime.base_idm.state_dict().items():
+                                        torch.testing.assert_close(value, self.base_weights[name], rtol=0, atol=0)
                                 case.assertTrue(adapter._adaptation_started)
-                                case.assertEqual(coordinator.status["collection_start_control_step"],
-                                                 reset_waiting_steps)
-                                case.assertEqual(coordinator.status["collection_step"],
-                                                 self.smoke_steps - retrigger_step)
-                                case.assertEqual(coordinator.worker.learner_version, 1)
-                                case.assertEqual(coordinator.policy_version, 1)
-                                case.assertEqual(coordinator.worker.process.pid, self.learner_pid)
-                                case.assertIsNone(coordinator.worker.pending_job)
-                                case.assertTrue(any(not torch.equal(p, self.before_weights[n])
-                                                    for n, p in fada_adapter_named_parameters(model)))
-                                after = adapter._runtime["runner"].infer(*self.probe)
-                                case.assertFalse(torch.equal(after, self.before_output))
-                                if self.smoke_steps > retrigger_step:
-                                    np.testing.assert_array_equal(adapter._keyboard_command, np.zeros(3))
-                                if self.smoke_steps == stop_step:
-                                    self.request_stop()
+                                self.request_stop()
 
-                    with patch.object(ConfigManager, "get_cfg", offline_cfg), \
-                            patch.dict(pipelines.__dict__, {"RlPipeline": SmokePipeline}), \
-                            patch.object(sys, "argv", [str(path), "-c", profile]):
-                        entry.main()
+                        def close(self):
+                            for gate in gates:
+                                gate.set()
+                            try:
+                                super().close()
+                            finally:
+                                if hasattr(self, "submit_patch"):
+                                    self.submit_patch.stop()
+                                if hasattr(self, "observe_patch"):
+                                    self.observe_patch.stop()
+
+                    argv = [str(path), "-c", profile]
+                    if payload:
+                        argv.extend(["--left-shoulder-load", "--left-shoulder-load-delay-s", "0"])
+                    try:
+                        with patch.object(ConfigManager, "get_cfg", offline_cfg), \
+                                patch.dict(pipelines.__dict__, {"RlPipeline": SmokePipeline}), \
+                                patch.object(sys, "argv", argv):
+                            entry.main()
+                    finally:
+                        for gate in gates:
+                            gate.set()
                     pipeline = captured[0]
-                    self.assertEqual(pipeline.smoke_steps, 42 if method == "none" else stop_step)
-                    self.assertTrue(pipeline.env.unitree.safe)
+                    self.assertTrue(pipeline.should_stop())
+                    if pipeline.cfg.env.is_sim:
+                        self.assertFalse(pipeline.env.viewer.is_alive)
+                    else:
+                        self.assertTrue(pipeline.env.unitree.safe)
                     coordinator = pipeline.policy.online_coordinator
                     if coordinator is not None:
+                        self.assertTrue(pipeline.reset_seen)
                         self.assertFalse(coordinator.worker.process.is_alive())
                         self.assertFalse(coordinator.worker._receiver.is_alive())
-                    print("REGISTERED_ENTRY_SMOKE", profile, "method=" + method,
-                          "frozen_reference=passed" if coordinator is None else "velocity_and_reset_gate=passed",
+                    print("REGISTERED_ENTRY_SMOKE", profile,
+                          "real_mujoco=True" if pipeline.cfg.env.is_sim else "hardware_io_stub=True",
+                          "baseline_frozen=True" if coordinator is None else "trigger_reset_relearn=passed",
                           "applied_version=" + str(0 if coordinator is None else coordinator.policy_version),
-                          "safe_requested=True")
+                          "payload=3kg_on_forward" if payload else "payload=off",
+                          "shutdown=passed")
 
 
 if __name__ == "__main__":

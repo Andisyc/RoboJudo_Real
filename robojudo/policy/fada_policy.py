@@ -403,10 +403,10 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             histories = self.playback_controller.prepare_query(candidate, self._pending_command)
             if self.online_coordinator is not None and self._control_active:
                 coordinator = self.online_coordinator
-                synchronous = coordinator.config.execution_mode == "sync"
+                legacy = coordinator.runtime.method == "fada"
                 if not self._adaptation_started and np.any(self._pending_command != 0.0):
                     self._adaptation_started = True
-                    if synchronous:
+                    if legacy:
                         coordinator.enable_updates(self._control_step)
                     logger.info(
                         "FADA online updates triggered at control_step=%d command=%s",
@@ -418,7 +418,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                     policy_control_active=True, action_dispatched=False,
                     **self._pending_sensor,
                 )
-                collect = synchronous or self._adaptation_started
+                collect = legacy or self._adaptation_started
                 if collect:
                     coordinator.observe(histories[0][:, -1], histories[2], evidence)
                     coordinator.apply_pending_at_step_boundary()

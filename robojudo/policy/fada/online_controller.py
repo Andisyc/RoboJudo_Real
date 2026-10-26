@@ -115,7 +115,7 @@ class FADAOnlineCoordinator:
         )
 
     def enable_updates(self, control_step: int) -> None:
-        """Arm synchronous simulation learning without discarding recorded history."""
+        """Arm legacy FADA learning without discarding recorded history."""
         self._check_owner()
         if self._stopping:
             raise FADALearnerError("coordinator is stopping")
@@ -138,7 +138,7 @@ class FADAOnlineCoordinator:
         self._accepted_frame = result.accepted
         self._report_rejection("observation", result, evidence)
         if isinstance(result.sample, FADACausalWindow):
-            if self.config.execution_mode == "sync" and (
+            if (
                 self._update_start_step is None
                 or result.sample.evidence.control_step < self._update_start_step
             ):
@@ -161,7 +161,7 @@ class FADAOnlineCoordinator:
 
     def try_submit(self):
         self._check_owner()
-        update_start = (self._update_start_step if self.config.execution_mode == "sync"
+        update_start = (self._update_start_step if self.runtime.method == "fada"
                         else self._collection_start_step)
         if (self._stopping or not self._active or not self._accepted_frame
                 or update_start is None):
@@ -236,6 +236,8 @@ class FADAOnlineCoordinator:
         self._check_owner()
         if self._stopping or not self._active or not self._accepted_frame:
             return False
+        if self.runtime.method == "fada" and self._update_start_step is None:
+            return False
         self.poll()
         if self._publication is None:
             return False
@@ -278,11 +280,11 @@ class FADAOnlineCoordinator:
         self._step = -1
         self._collection_start_step = None
         self._update_start_step = None
-        if self.config.execution_mode == "sync":
+        if self.runtime.method == "fada":
             self._outbox.clear()
         self._active = False
         self._accepted_frame = False
-        # Keep outbox, accepted job, staged result and the worker's optimizer/anchor.
+        # Keep accepted jobs, staged results and the worker's optimizer/anchor.
 
     def request_stop(self) -> None:
         self._stopping = True

@@ -444,14 +444,18 @@ A background transport thread receives complete result messages; control-side
 does not make it wait for the remaining pipe frame. The monotone stop flag has
 no process-owned lock.
 
-Once deployment collection has been triggered, the single control writer uses this order:
+The single control writer uses this order when collecting physical history:
 
 1. `observe(state, command, evidence)` closes the preceding physical submission.
 2. `poll()` receives validated completions; `apply_pending_at_step_boundary()`
    prepares and applies the entire adapter set before the next forward.
-3. `try_submit()` admits at most one eligible batch without waiting for learning.
+3. `try_submit()` admits at most one eligible batch; asynchronous control never waits for learning.
 4. Infer with `runtime.infer_with_snapshot`, perform the real submission, then
    `record_action(snapshot, evidence)` with the applied `policy_version`.
+
+Legacy FADA records bounded raw history during active standing control but admits
+no training samples until the caller arms `enable_updates(control_step)` on the
+first nonzero velocity command. Expert collection starts at that velocity trigger.
 
 Legacy scheduling requires a non-empty mature batch at a ten-step interval,
 not a full expert window. Its ordered transport outbox has capacity 40 by
@@ -464,17 +468,18 @@ are separate: `status` reports completed/applied versions, in-flight job,
 pending counts, update statistics and latency. A result cannot admit another
 job until its version is applied.
 
-The collection start is recorded separately from the real episode control-step
-index. Warmup and interval eligibility use elapsed control steps from that
-collection start, not time spent waiting for a velocity command. The numeric
+Collection start is recorded separately from the real episode control-step index.
+Legacy interval eligibility uses elapsed control steps from `enable_updates`;
+expert warmup/interval eligibility uses its collection start. Time spent waiting
+for a velocity command does not advance either submission clock. The numeric
 warmup/window/interval settings and legacy partial-batch behavior are unchanged.
 
-`reset()` requires a new increasing episode identity, clears incomplete data
-and unsubmitted expert samples, but retains legacy mature data and accepted
-complete jobs. A pre-reset job may finish and its learning is retained; it can
-only acknowledge its original IDs and publish after collection is triggered
-again at a valid control boundary. No new job/publication is admitted during
-preparation or zero-command waiting before that trigger.
+`reset()` requires a new increasing episode identity and clears incomplete history
+and unsubmitted samples in both methods. Accepted jobs and staged results are
+retained: a pre-reset job may finish, acknowledge only its original IDs, and publish
+after learning is triggered again at a valid control boundary. No new
+job/publication is admitted during preparation or zero-command waiting before
+that trigger.
 Ordinary reset does not reset Adam, the frozen base or deployment anchor.
 
 `request_stop()` invalidates pending publication without waiting for learning.
@@ -530,16 +535,17 @@ trajectories; active physical history cannot be rewound using snapshot restore.
 
 Online learning has a separate, one-shot velocity gate. After preparation,
 zero-command waiting still performs policy inference, actual submissions and
-receipt-confirmed raw action-history commits, but does not collect training
+receipt-confirmed raw action-history commits, but does not admit training
 samples, submit updates or publish weights. The first effective nonzero
-forward/lateral/yaw command during active control triggers collection. The
+forward/lateral/yaw command during active control enables learning. Legacy FADA
+already records raw history while waiting; expert collection starts at this trigger. The
 control history and real control-step index are not reset at this transition;
 waiting history remains legitimate model context, not fabricated training
 targets. The legacy collector retains its existing mid-episode history rules.
 
 After triggering, `x` clears the velocity command but does not disable learning.
-Reset or leaving active control closes the gate and restarts collection-relative
-timing, without resetting learned weights/Adam or changing accepted-job retention.
+Reset or leaving active control closes the gate; the next motion command rearms
+scheduling without resetting learned weights/Adam or changing accepted-job retention.
 Old in-flight work may complete while waiting, but cannot publish until the
 next trigger; warmup governs new submissions, not retained-result publication.
 The worker still completes its READY handshake on the cold path and is polled
@@ -563,6 +569,20 @@ reset retention, rejected submissions, startup failure and interrupted main.
 No actual SDK2/DDS controller was created. Native build/receiver acceptance,
 target-device timing, physical stop delivery and adaptation quality remain
 unverified. The comparison entry/configuration delivery is described below.
+
+The registered-entry acceptance runs `scripts/run_pipeline.py:main()` for
+`g1_fada_baseline`, `g1_fada_online`, `g1_fada_online_async`,
+`g1_real_fada_baseline` and `g1_real_fada_online`. Simulation uses real MuJoCo
+physics with rendering replaced; hardware profiles replace only the SDK/sensor/
+actuator boundary. With a small checkpoint fixture and real learner processes,
+the paced main loop exercises standing without learning, 0.4m/s keyboard commands,
+training/publication, reset and relearning, and shutdown. Async control is checked
+not to call the learner wait API, including while a submitted job is held across
+reset. Baselines remain frozen; simulated physics advances one policy period per
+step, and learner processes/receiver threads are reaped on exit. This validates
+entry connectivity and lifecycle, not walking stability, GUI rendering or physical
+hardware deadlines. The focused regression is
+`TestFADADeploymentIntegration.test_registered_comparison_profiles_run_through_main`.
 
 #### Comparison startup profiles (step 6)
 
@@ -604,23 +624,74 @@ For legacy FADA online updates in MuJoCo, use the same environment and checkpoin
 python scripts/run_pipeline.py -c g1_fada_online
 ```
 
-This entry uses `online_adaptation.execution_mode="sync"`: it records bounded
-observation/action history while standing, without training or accumulating a
+For the asynchronous MuJoCo comparison matching the real-robot update schedule:
+
+```bash
+python scripts/run_pipeline.py \
+  -c g1_fada_online_async
+```
+
+This profile retains real-time pacing (`run_fullspeed=false`) and supports the
+same optional payload flags below. The existing `g1_fada_online` synchronous
+reference is unchanged. Both use 0.4m/s for `w`, as do `g1_real_fada_online` and
+`g1_real_fada_baseline`; the real-robot expert-difference profile is unchanged.
+
+
+Legacy FADA simulation and real-robot entries record bounded observation/action
+history during active standing control, without training or accumulating a
 training batch. The first nonzero terminal velocity command enables learning;
 only windows whose supervised action starts at or after that command are trained.
-Each submitted update completes and its LoRA weights are applied before the next
-inference, with no physics advancement while waiting. The existing learner and
-optimizer are reused; CPU/CUDA selection and learning hyperparameters are unchanged.
-`x` zeros velocity but does not turn learning off. Reborn clears history, queued
-samples and the learning gate while retaining learned LoRA and optimizer state.
+Both modes check submission eligibility every 10 control steps from that trigger.
+The `g1_fada_online` simulation entry uses `execution_mode="sync"`: each submitted
+update completes and its LoRA weights are applied before the next inference,
+with no physics advancement while waiting. The existing learner and optimizer
+are reused; CPU/CUDA selection and learning hyperparameters are unchanged.
+`x` zeros velocity but does not turn learning off. Legacy FADA reset/reborn clears
+raw history, unsubmitted batches and the learning gate in both modes, retaining
+learned LoRA, Adam, accepted jobs and completed-but-unapplied publications.
 Startup prints `[FADA LEARNER]` after the learner is ready. Each successfully
 applied weight version prints `[FADA UPDATE]` with its control step, sample count,
 loss and training duration. Rejected collection frames print `[FADA COLLECT]`
 with the reason, once per stage/reason in each episode to avoid flooding the console.
 Real-robot profiles retain `execution_mode="async"`; synchronous mode is rejected
 outside legacy FADA MuJoCo simulation before hardware initialization.
-No Unitree SDK controller or DDS participant is created. Rendering requires a
+The asynchronous simulation and real-robot entries share the collection and learning trigger, but continue
+control while the learner runs. They apply full publications at eligible control
+step boundaries. A closed learning gate holds completed publications without
+changing actor weights, including late results received while standing after reset.
+The simulation entry creates no Unitree SDK controller or DDS participant.
+Rendering requires a
 graphical display; do not use `start.sh` or unset `DISPLAY`.
+
+For frozen-base trajectory-difference adaptation in MuJoCo, use the dedicated
+`g1_fada_expert_online_async` profile. It shares the baseline scene and paired PT,
+uses terminal `w` at 0.4m/s and paced asynchronous control, and leaves the existing
+real-robot expert profile unchanged:
+
+```bash
+uv run python scripts/run_pipeline.py \
+  -c g1_fada_expert_online_async \
+  --left-shoulder-load \
+  --left-shoulder-load-delay-s 0
+```
+
+The load is optional. Zero delay attaches 3kg on the first positive forward
+command, not at program startup; set `30` for the delayed-load comparison.
+Expert collection starts at the first nonzero velocity command. It retains the
+40-control-step warmup, latest ten-sample window, ten-step submission checks,
+frozen base IDM, deployment anchor and Adam state. No synchronous expert mode or
+mandatory pre-walk period is introduced. Reset clears unsubmitted samples while
+preserving accepted jobs; late results apply only after a new velocity trigger.
+
+The focused regression
+`TestFADADeploymentIntegration.test_registered_expert_simulation_with_payload_runs_through_main`
+exercises the real entrypoint, MuJoCo physics and spawned expert learner with a
+small checkpoint fixture and rendering replaced. It verifies nominal/executed/
+realized trajectory pairing, unchanged frozen parameters, weight-dependent
+inference, reset/relearning, actual +3kg mass on forward commands and removal on
+reset, nonblocking asynchronous control and complete shutdown. It does not
+establish GUI rendering, learned-policy walking stability or load recovery.
+
 
 Add `--left-shoulder-load` for the legacy TTT comparison: walk at 0.4m/s with
 online learning for 30 simulation seconds before attaching the 3kg payload:

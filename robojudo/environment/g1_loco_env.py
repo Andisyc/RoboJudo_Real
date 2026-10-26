@@ -10,9 +10,20 @@ from robojudo.environment.env_cfgs import UnitreeEnvCfg
 from robojudo.utils.util_func import quat_rotate_inverse_np
 
 
-def _load_g1_loco_bridge(num_dofs: int):
-    """Import the g1_loco_bridge variant matching the robot DoF count."""
-    if num_dofs == 23:
+def _load_g1_loco_bridge(num_dofs: int, bridge_variant: str = "legacy"):
+    """Select the firmware variant explicitly; preserve legacy DoF routing."""
+    if bridge_variant == "v2":
+        if num_dofs != 29:
+            raise ValueError("g1_loco_bridge_v2 requires the 29DoF environment")
+        from g1_loco_bridge_v2 import (  # type: ignore
+            AuthorityState,
+            G1LocoController,
+            RobotState,
+            SportState,
+        )
+    elif bridge_variant != "legacy":
+        raise ValueError(f"Unknown G1 Bridge variant: {bridge_variant}")
+    elif num_dofs == 23:
         from g1_loco_bridge_23dof import (  # type: ignore
             AuthorityState,
             G1LocoController,
@@ -55,7 +66,7 @@ class G1LocoEnv(Environment):
             self._G1LocoController,
             self._RobotState,
             self._SportState,
-        ) = _load_g1_loco_bridge(self.num_dofs)
+        ) = _load_g1_loco_bridge(self.num_dofs, cfg_env.bridge_variant)
         self.robot_state = None
         self.sport_state = None
 

@@ -20,6 +20,7 @@ class G1LocoEnvCfg(G1EnvCfg, UnitreeEnvCfg):
     """Real G1 environment that can hand control to and from Unitree loco."""
 
     env_type: str = "G1LocoEnv"
+    bridge_variant: Literal["legacy", "v2"] = "legacy"
     unitree: G1LocoUnitreeCfg = G1LocoUnitreeCfg(
         net_if="eth0",
         robot="g1",

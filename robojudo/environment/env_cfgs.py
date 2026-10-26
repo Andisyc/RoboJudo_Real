@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from robojudo.config import Config
 from robojudo.tools.tool_cfgs import DoFConfig, ForwardKinematicCfg, ZedOdometryCfg
@@ -44,7 +44,9 @@ class MujocoEnvCfg(EnvCfg):
     policy_gyro_sensor: str | None = None
     policy_upvector_sensor: str | None = None
     left_shoulder_load: bool = False
-    """Attach a rigid 3kg left-shoulder load on the first forward command."""
+    """Enable the rigid 3kg left-shoulder load, timed from the first forward command."""
+    left_shoulder_load_delay_s: float = Field(default=30.0, ge=0.0, allow_inf_nan=False)
+    """Simulation seconds after the first forward command; zero attaches immediately."""
 
     visualize_extras: bool = True  # TODO: remove
 

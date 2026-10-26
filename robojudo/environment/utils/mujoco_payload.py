@@ -16,11 +16,13 @@ logger = logging.getLogger(__name__)
 class MujocoShoulderPayload:
     mass_kg = 3.0
 
-    def __init__(self, model, data, *, enabled: bool):
+    def __init__(self, model, data, *, enabled: bool, delay_steps: int = 0):
         self.model = model
         self.data = data
         self.enabled = enabled
         self.active = False
+        self.delay_steps = delay_steps
+        self._attach_control_step: int | None = None
         if not enabled:
             return
         self.body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "torso_link")
@@ -64,15 +66,28 @@ class MujocoShoulderPayload:
         mujoco.mj_forward(self.model, self.data)
         self.active = active
 
-    def before_step(self, velocity_command):
-        if (self.enabled and not self.active and velocity_command is not None
-                and velocity_command[0] > 0):
+    def before_step(self, velocity_command, *, control_step: int):
+        if not self.enabled or self.active:
+            return
+        if self._attach_control_step is None:
+            if velocity_command is None or velocity_command[0] <= 0:
+                return
+            self._attach_control_step = control_step + self.delay_steps
+            if self.delay_steps:
+                logger.info(
+                    "[PAYLOAD] Left shoulder +3 kg scheduled control_step=%d delay_steps=%d",
+                    self._attach_control_step, self.delay_steps,
+                )
+        if control_step >= self._attach_control_step:
             self._set(True)
-            logger.warning("[PAYLOAD] Left shoulder +3 kg attached on forward command")
+            logger.warning(
+                "[PAYLOAD] Left shoulder +3 kg attached control_step=%d", control_step,
+            )
 
     def reset(self):
         if self.active:
             self._set(False)
+        self._attach_control_step = None
 
     def draw(self, viewer):
         if self.active:

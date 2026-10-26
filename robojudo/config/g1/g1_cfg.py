@@ -178,11 +178,14 @@ class g1_real_fada_planner_idm(g1_fada_planner_idm):  # Sim2Real
     do_safety_check: bool = True
 
 
-def _fada_comparison_policy(method: str, *, execution_mode: str = "async") -> G1FADAPlannerIDMPolicyCfg:
+def _fada_comparison_policy(
+    method: str, *, execution_mode: str = "async", forward_speed: float = 0.6,
+) -> G1FADAPlannerIDMPolicyCfg:
     return G1FADAPlannerIDMPolicyCfg(
         policy_name="plaidm_v024_close_some_dr",
         checkpoint_filename="planner_idm_close_some_dr_v001.pt",
         gait_phase_enabled=True,
+        keyboard_command_magnitudes=[forward_speed, 0.4, 0.8],
         online_adaptation=FADAOnlineAdaptationCfg(
             method=method,
             execution_mode=execution_mode,
@@ -197,14 +200,16 @@ class g1_fada_baseline(g1_fada_planner_idm):
     """Frozen v024 reference in MuJoCo, without hardware or online learning."""
 
     ctrl: List[KeyboardCtrlCfg] = [KeyboardCtrlCfg(backend="terminal")]
-    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("none")
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("none", forward_speed=0.4)
 
 
 @cfg_registry.register
 class g1_fada_online(g1_fada_baseline):
     """Legacy streaming FADA in MuJoCo, without Unitree hardware."""
 
-    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("fada", execution_mode="sync")
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy(
+        "fada", execution_mode="sync", forward_speed=0.4,
+    )
 
 
 @cfg_registry.register

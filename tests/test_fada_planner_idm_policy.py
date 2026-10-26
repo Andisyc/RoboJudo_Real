@@ -297,12 +297,12 @@ class TestMujocoShoulderPayload(unittest.TestCase):
         bias = data.qfrc_bias.copy()
         qpos, qvel, clock = data.qpos.copy(), data.qvel.copy(), data.time
         disabled = MujocoShoulderPayload(model, data, enabled=False)
-        disabled.before_step([0.6, 0.0, 0.0])
+        disabled.before_step([0.6, 0.0, 0.0], control_step=0)
         self.assertEqual(float(model.body_mass[body]), 10.0)
         payload = MujocoShoulderPayload(model, data, enabled=True)
-        payload.before_step([0.0, 0.0, 0.0])
+        payload.before_step([0.0, 0.0, 0.0], control_step=0)
         self.assertFalse(payload.active)
-        payload.before_step([0.6, 0.0, 0.0])
+        payload.before_step([0.6, 0.0, 0.0], control_step=1)
         self.assertEqual(float(model.body_mass[body]), 13.0)
         np.testing.assert_allclose(
             data.qfrc_bias[3:6] - bias[3:6],
@@ -312,7 +312,7 @@ class TestMujocoShoulderPayload(unittest.TestCase):
         np.testing.assert_array_equal(data.qpos, qpos)
         np.testing.assert_array_equal(data.qvel, qvel)
         self.assertEqual(data.time, clock)
-        payload.before_step([0.6, 0.0, 0.0])
+        payload.before_step([0.6, 0.0, 0.0], control_step=2)
         self.assertEqual(float(model.body_mass[body]), 13.0)
         self.assertTrue(np.all(model.body_inertia[body] > 0))
         payload.reset()
@@ -322,6 +322,41 @@ class TestMujocoShoulderPayload(unittest.TestCase):
         ), baseline):
             np.testing.assert_array_equal(actual[body], expected)
         np.testing.assert_allclose(data.qfrc_bias, bias, atol=1e-9)
+
+    def test_delayed_load_starts_on_forward_and_reset_rearms(self):
+        import mujoco
+        from robojudo.environment.utils.mujoco_payload import MujocoShoulderPayload
+
+        model = mujoco.MjModel.from_xml_string("""
+            <mujoco><worldbody><body name="torso_link">
+            <freejoint/><inertial pos="0 0 0" mass="10" diaginertia="0.2 0.3 0.4"/>
+            </body></worldbody></mujoco>
+        """)
+        data = mujoco.MjData(model)
+        body = model.body("torso_link").id
+        payload = MujocoShoulderPayload(model, data, enabled=True, delay_steps=1500)
+        payload.before_step([0.0, 0.0, 0.0], control_step=500)
+        payload.before_step([0.4, 0.0, 0.0], control_step=600)
+        payload.before_step([0.4, 0.0, 0.0], control_step=2099)
+        self.assertEqual(float(model.body_mass[body]), 10.0)
+        # Once triggered, elapsed simulation steps count even if velocity is cleared.
+        payload.before_step([0.0, 0.0, 0.0], control_step=2100)
+        self.assertEqual(float(model.body_mass[body]), 13.0)
+        payload.before_step([0.4, 0.0, 0.0], control_step=2101)
+        self.assertEqual(float(model.body_mass[body]), 13.0)
+        payload.reset()
+        self.assertEqual(float(model.body_mass[body]), 10.0)
+        payload.before_step([0.4, 0.0, 0.0], control_step=2200)
+        payload.before_step([0.4, 0.0, 0.0], control_step=3699)
+        self.assertFalse(payload.active)
+        payload.reset()
+        payload.before_step([0.0, 0.0, 0.0], control_step=3700)
+        self.assertEqual(float(model.body_mass[body]), 10.0)
+        payload.before_step([0.4, 0.0, 0.0], control_step=4000)
+        payload.before_step([0.4, 0.0, 0.0], control_step=5499)
+        self.assertFalse(payload.active)
+        payload.before_step([0.4, 0.0, 0.0], control_step=5500)
+        self.assertEqual(float(model.body_mass[body]), 13.0)
 
 
 class TestFADATrainableRuntime(unittest.TestCase):

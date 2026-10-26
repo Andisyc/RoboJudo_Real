@@ -1,4 +1,5 @@
 from typing import Optional
+from math import ceil
 import logging
 import time
 
@@ -54,6 +55,7 @@ class MujocoEnv(Environment):
         self._simulation_state_ready_ns = time.monotonic_ns()
         self._shoulder_payload = MujocoShoulderPayload(
             self.model, self.data, enabled=cfg_env.left_shoulder_load,
+            delay_steps=ceil(cfg_env.left_shoulder_load_delay_s / self.control_dt),
         )
 
         self.viewer = mujoco_viewer.MujocoViewer(
@@ -217,7 +219,9 @@ class MujocoEnv(Environment):
         if hand_pose is not None:
             logger.info("Hand pose-->", hand_pose)
 
-        self._shoulder_payload.before_step(velocity_command)
+        self._shoulder_payload.before_step(
+            velocity_command, control_step=self._simulation_frame_id,
+        )
         self.viewer.cam.lookat = self.data.qpos.astype(np.float32)[:3]
         if self.viewer.is_alive:
             self._shoulder_payload.draw(self.viewer)

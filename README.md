@@ -595,7 +595,7 @@ an environment with a graphical display. This profile disables online updates
 and does not initialize Unitree hardware. Do not use `start.sh` for simulation:
 it also starts the hardware DDS trajectory recorder.
 The profile explicitly reads keyboard input from the launching terminal, even
-when `DISPLAY` is set. Focus that terminal: press `w` to move forward at 0.6m/s
+when `DISPLAY` is set. Focus that terminal: press `w` to move forward at 0.4m/s
 or `x` to clear the velocity command; Enter is not required.
 
 For legacy FADA online updates in MuJoCo, use the same environment and checkpoint:
@@ -622,17 +622,26 @@ outside legacy FADA MuJoCo simulation before hardware initialization.
 No Unitree SDK controller or DDS participant is created. Rendering requires a
 graphical display; do not use `start.sh` or unset `DISPLAY`.
 
-Add `--left-shoulder-load` to enable a forward-triggered 3kg payload:
+Add `--left-shoulder-load` for the legacy TTT comparison: walk at 0.4m/s with
+online learning for 30 simulation seconds before attaching the 3kg payload:
 
 ```bash
-python scripts/run_pipeline.py -c g1_fada_online --left-shoulder-load
+python scripts/run_pipeline.py \
+  -c g1_fada_online \
+  --left-shoulder-load
 ```
 
 The option defaults off and also works with `g1_fada_baseline` for comparisons.
-The first positive forward velocity command (`w`) attaches it before that physics
-step; repeated `w` does not stack mass, and `x` does not detach it. Reset/reborn
-restores the nominal inertial properties and rearms the trigger for the next `w`.
-The option is rejected for real hardware before any pipeline/controller starts.
+The first positive forward velocity command (`w`) starts the delay, not program
+startup. Standing before `w` does not consume it. The delay uses completed physics
+control steps, so synchronous learner waits do not consume it either.
+`--left-shoulder-load-delay-s 0` retains immediate loading; any finite nonnegative
+delay can be supplied with `--left-shoulder-load`. Real-robot speeds are unchanged.
+Repeated `w` neither restarts the delay nor stacks mass. `x` clears velocity but
+does not cancel an armed attachment or detach the load. Reset/reborn restores the
+nominal inertial properties and rearms the full delay for the next `w`, including
+when reset happens before attachment. Both options are rejected for real hardware
+before any pipeline/controller starts.
 
 The load is rigidly combined with `torso_link` at body-local position
 `[0.004, 0.22, 0.15]`m, matching the TTT left-shoulder setup. It updates mass,

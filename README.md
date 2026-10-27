@@ -634,7 +634,7 @@ python scripts/run_pipeline.py \
 This profile retains real-time pacing (`run_fullspeed=false`) and supports the
 same optional payload flags below. The existing `g1_fada_online` synchronous
 reference is unchanged. Both use 0.4m/s for `w`, as do `g1_real_fada_online` and
-`g1_real_fada_baseline`; the real-robot expert-difference profile is unchanged.
+`g1_real_fada_baseline`. The expert simulation and real-robot profiles also use 0.4m/s.
 
 
 Legacy FADA simulation and real-robot entries record bounded observation/action
@@ -665,8 +665,8 @@ graphical display; do not use `start.sh` or unset `DISPLAY`.
 
 For frozen-base trajectory-difference adaptation in MuJoCo, use the dedicated
 `g1_fada_expert_online_async` profile. It shares the baseline scene and paired PT,
-uses terminal `w` at 0.4m/s and paced asynchronous control, and leaves the existing
-real-robot expert profile unchanged:
+uses terminal `w` at 0.4m/s and paced asynchronous control. The corresponding
+`g1_real_fada_expert_online` profile uses the same policy and learning settings:
 
 ```bash
 uv run python scripts/run_pipeline.py \
@@ -691,6 +691,15 @@ realized trajectory pairing, unchanged frozen parameters, weight-dependent
 inference, reset/relearning, actual +3kg mass on forward commands and removal on
 reset, nonblocking asynchronous control and complete shutdown. It does not
 establish GUI rendering, learned-policy walking stability or load recovery.
+
+The paired regression
+`TestFADADeploymentIntegration.test_registered_expert_sim_and_real_run_through_main`
+exercises both registered expert entries without payload. MuJoCo physics remains
+real; the hardware entry substitutes the SDK/sensor/actuator boundary and runs
+the preparation lifecycle. Both use real learner processes and verify trajectory
+pairing, frozen parameters, asynchronous updates, reset with retained in-flight
+work, renewed learning and shutdown. This does not verify physical DDS/IMU I/O,
+terminal device input, target-device deadlines or robot stability.
 
 
 Add `--left-shoulder-load` for the legacy TTT comparison: walk at 0.4m/s with
@@ -800,11 +809,19 @@ python scripts/run_pipeline.py \
 Frozen-base trajectory-difference streaming:
 
 ```bash
-python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   -c g1_real_fada_expert_online
 ```
+Focus the launching terminal after preparation. This profile explicitly selects
+`KeyboardCtrlCfg(backend="terminal")`, including when `DISPLAY` is set. Press `w`
+for 0.4m/s forward motion; `x` zeros velocity without disabling learning after
+the first trigger. Simulation and hardware share the expert method, paired PT,
+40-step warmup, ten-sample window, ten-step submission checks and async mode;
+hardware preparation, sensor validation, safety checks and connection settings
+remain hardware-specific and unchanged. Payload flags are simulation-only.
 
-The entry only accepts `-c/--config`; dotted Hydra overrides or a
+
+Hardware profile selection uses `-c/--config`; dotted Hydra overrides or a
 `--fada-method` argument are not supported. These remain keyboard profiles.
 Ctrl-C exits through the common safety-request/cleanup path; the generic
 Unitree-controller `A` mapping below is not selected by these profiles.
@@ -818,9 +835,10 @@ env -u DISPLAY ./start.sh \
   -c g1_real_fada_expert_online
 ```
 
-On Linux, unsetting `DISPLAY` selects the `terminal` keyboard backend when the
-backend setting is `auto`; a server `DISPLAY=:0` would otherwise select
-`pynput`. The wrapper still handles its original DDS configuration and recorder
+For profiles still using `backend="auto"`, unsetting `DISPLAY` on Linux selects
+the terminal backend; a server `DISPLAY=:0` would otherwise select `pynput`.
+The expert real-robot profile now selects terminal input explicitly. The wrapper
+still handles its original DDS configuration and recorder
 cleanup. Replace only the configuration name for legacy or frozen comparisons;
 no-argument invocation retains the Python entry's existing default.
 After preparation, issue a velocity command to start online collection. In the

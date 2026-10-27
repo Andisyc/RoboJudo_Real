@@ -1832,6 +1832,11 @@ class TestFADADeploymentIntegration(unittest.TestCase):
     def test_registered_expert_simulation_with_payload_runs_through_main(self):
         self._exercise_registered_profiles(("g1_fada_expert_online_async",), payload=True)
 
+    def test_registered_expert_sim_and_real_run_through_main(self):
+        self._exercise_registered_profiles((
+            "g1_fada_expert_online_async", "g1_real_fada_expert_online",
+        ))
+
     def _exercise_registered_profiles(self, profiles, *, payload=False):
         import robojudo.pipeline as pipelines
 

@@ -250,7 +250,8 @@ class g1_real_fada_online(g1_real_fada_planner_idm):
 class g1_real_fada_expert_online(g1_real_fada_planner_idm):
     """Frozen-base trajectory-difference streaming adaptation."""
 
-    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("expert_difference")
+    ctrl: List[KeyboardCtrlCfg] = [KeyboardCtrlCfg(backend="terminal")]
+    policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("expert_difference", forward_speed=0.4)
 
 
 @cfg_registry.register

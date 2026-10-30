@@ -208,6 +208,7 @@ class G1TrajectoryRecorder:
         num_dofs: int = 29,
         bindings: UnitreeSubscriberBindings | None = None,
         armed: bool = False,
+        metadata: dict[str, Any] | None = None,
     ):
         if num_dofs <= 0:
             raise ValueError("num_dofs must be positive")
@@ -216,6 +217,7 @@ class G1TrajectoryRecorder:
         self._output_path = Path(output_path) if output_path is not None else default_output_path()
         self._append_duration_to_name = output_path is None
         self._writer_metadata = {"net_if": net_if, "num_dofs": num_dofs}
+        self._writer_metadata.update(metadata or {})
         self.writer: MsgpackEventWriter | None = None
         self._started_monotonic_ns: int | None = None
         self._summary: dict[str, Any] | None = None

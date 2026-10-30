@@ -55,9 +55,16 @@ def main():
     print("\n")
 
     try:
+        record_dir = os.environ.get("ROBOJUDO_RECORD_DIR")
+        if record_dir:
+            pipeline.configure_motion_trace(record_dir, os.environ.get("ROBOJUDO_RUN_ID", record_dir))
         # if mujoco = False
         if not cfg.env.is_sim:
+            pipeline._motion_trace_phase = "preparing"
+            pipeline.trace_event("lifecycle", phase="prepare_start")
             pipeline.prepare()
+            pipeline.trace_event("lifecycle", phase="prepare_end")
+        pipeline._motion_trace_phase = "playing"
 
         # continue execute step
         while not getattr(pipeline, "should_stop", False):
@@ -81,24 +88,27 @@ def main():
     except KeyboardInterrupt:
         logger.warning("Interrupted by user")
     finally:
-        close = getattr(pipeline, "close", None)
-        if callable(close):
-            close_result = 1
-            while close_result not in (None, 0):
-                try:
-                    close_result = close()
-                    if close_result not in (None, 0):
+        try:
+            close = getattr(pipeline, "close", None)
+            if callable(close):
+                close_result = 1
+                while close_result not in (None, 0):
+                    try:
+                        close_result = close()
+                        if close_result not in (None, 0):
+                            logger.critical(
+                                "Control release is not confirmed; keeping the process "
+                                "alive and retrying close: %s",
+                                close_result,
+                            )
+                            time.sleep(0.5)
+                    except KeyboardInterrupt:
                         logger.critical(
-                            "Control release is not confirmed; keeping the process "
-                            "alive and retrying close: %s",
-                            close_result,
+                            "Control release is still pending; ignoring interrupt while "
+                            "the controller remains active"
                         )
-                        time.sleep(0.5)
-                except KeyboardInterrupt:
-                    logger.critical(
-                        "Control release is still pending; ignoring interrupt while "
-                        "the controller remains active"
-                    )
+        finally:
+            pipeline.close_motion_trace()
 
 
 if __name__ == "__main__":

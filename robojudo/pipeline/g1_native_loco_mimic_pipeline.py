@@ -113,7 +113,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
         observation, extras = self.policy.get_observation(env_data, ctrl_data)
         pd_target = self.policy.get_pd_target(observation)
-        result = self.env.acquire_user_control(pd_target)
+        result = self.send_traced(pd_target, phase="acquiring", sender=self.env.acquire_user_control)
         if result != 0:
             logger.error("Failed to acquire G1 user control: %s", result)
             self.state = NativeLocoMimicState.FAULT
@@ -136,6 +136,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
             raise RuntimeError(f"G1 user control was not armed: {status}")
 
         self.state = NativeLocoMimicState.MIMIC_ACTIVE
+        self.trace_event("native_state", state=self.state.name)
         logger.warning("G1 user control acquired; mimic policy active: %s", status)
         return extras, pd_target
 
@@ -149,6 +150,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
         result = self.env.release_to_walkrun()
         if result == 0:
             self.state = NativeLocoMimicState.NATIVE_LOCO
+            self.trace_event("native_state", state=self.state.name)
             self.policy.reset()
             self.env.reset()
             logger.warning(
@@ -190,6 +192,8 @@ class G1NativeLocoMimicPipeline(Pipeline):
 
     def _handle_commands(self, commands, env_data, ctrl_data):
         initial_mimic_step = None
+        if commands:
+            self.trace_event("commands", commands=commands, state=self.state.name)
         for command in commands:
             if command == "[SHUTDOWN]":
                 self._shutdown()
@@ -209,7 +213,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
     def _step_mimic(self, env_data, ctrl_data):
         observation, extras = self.policy.get_observation(env_data, ctrl_data)
         pd_target = self.policy.get_pd_target(observation)
-        self.env.step(pd_target, extras.get("hand_pose", None))
+        self.send_traced(pd_target, extras.get("hand_pose", None), commands=ctrl_data.get("COMMANDS", []))
         return extras, pd_target
 
     def _safety_check(self):

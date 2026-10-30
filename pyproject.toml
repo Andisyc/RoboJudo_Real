@@ -28,6 +28,10 @@ dev = [
 export = [
     "onnx",
 ]
+analysis = [
+    "matplotlib",
+    "onnx",
+]
 
 [tool.ruff]
 line-length = 120

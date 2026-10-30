@@ -383,7 +383,10 @@ class RlLocoMimicPipeline(RlMultiPolicyPipeline):
 
         # if not dummy_env update obs info
         if not dry_run:
-            self.env.step(pd_target, extras.get("hand_pose", None))
+            interp = self.policy_manager.interp_state.name
+            phase = "interpolating" if interp != "IDLE" else (
+                "locomotion" if self.policy_manager.current_policy_id == self.policy_manager.policy_loco_id else None)
+            self.send_traced(pd_target, extras.get("hand_pose", None), phase=phase, commands=commands)
             # logger.debug(pd_target)
         
         # 发送给电机耗时

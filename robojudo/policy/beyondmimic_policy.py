@@ -161,6 +161,8 @@ class BeyondMimicPolicy(Policy):
         self.get_action(obs)
 
     def reset(self):
+        self._motion_trace_generation = getattr(self, "_motion_trace_generation", 0)+1
+        self._motion_trace_snapshot = None
         self.timestep: float = self.cfg_policy.start_timestep
         if self.use_motion_from_model:
             self.pbar = ProgressBar(f"Beyondmimic {self.cfg_policy.policy_name}", self.max_timestep)
@@ -323,6 +325,12 @@ class BeyondMimicPolicy(Policy):
 
         # resize action (regularization)
         scaled_actions = actions * self.action_scales
+
+        if getattr(self, "_motion_trace_enabled", False):
+            from robojudo.tools.motion_trace import capture_inference
+            # self.command is the reference used by the observation before it is replaced below.
+            capture_inference(self, int(self.timestep), self.command,
+                              ort_outputs, actions, scaled_actions)
 
         # update regressive cmd
         if self.use_motion_from_model:

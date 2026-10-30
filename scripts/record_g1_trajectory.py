@@ -14,6 +14,7 @@ def parse_args():
     )
     parser.add_argument("--net-if", required=True, help="Network interface used for Unitree DDS")
     parser.add_argument("--output", help="Output .msgpack path; defaults to logs/g1_trajectory_<time>.msgpack")
+    parser.add_argument("--run-id", help="Shared execution ID for motion/state alignment")
     parser.add_argument(
         "--start-trigger-file",
         help="Arm immediately, but do not write until this file exists",
@@ -40,6 +41,7 @@ def main():
         net_if=args.net_if,
         output_path=args.output,
         armed=trigger_path is not None,
+        metadata={"run_id": args.run_id} if args.run_id else None,
     )
     if args.ready_file:
         Path(args.ready_file).touch(exist_ok=True)

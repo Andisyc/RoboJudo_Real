@@ -33,6 +33,7 @@ recording_enabled() {
 start_trajectory_recorder() {
     if ! recording_enabled; then
         unset ROBOJUDO_TRAJECTORY_START_FILE
+        unset ROBOJUDO_RECORD_DIR ROBOJUDO_RUN_ID
         echo "Trajectory recording disabled."
         return
     fi
@@ -41,15 +42,20 @@ start_trajectory_recorder() {
         echo "Could not create trajectory recording trigger directory." >&2
         exit 1
     fi
-    trajectory_trigger_file="${trajectory_trigger_dir}/start"
     trajectory_ready_file="${trajectory_trigger_dir}/ready"
-    export ROBOJUDO_TRAJECTORY_START_FILE="${trajectory_trigger_file}"
+    unset ROBOJUDO_TRAJECTORY_START_FILE
+    mkdir -p logs
+    ROBOJUDO_RECORD_DIR="$(mktemp -d "logs/g1_run_$(date +%y%m%d-%H%M%S).XXXXXX")" || return 1
+    ROBOJUDO_RUN_ID="$(basename "${ROBOJUDO_RECORD_DIR}")"
+    export ROBOJUDO_RECORD_DIR ROBOJUDO_RUN_ID
+    echo "Synchronized recording directory: ${ROBOJUDO_RECORD_DIR}"
 
     # The deployed unitree_sdk2py participant works with its automatic DDS
     # configuration; keep RoboJuDo's CYCLONEDDS_URI only for the controller.
     env -u CYCLONEDDS_URI python scripts/record_g1_trajectory.py \
         --net-if "${UNITREE_NET_IF}" \
-        --start-trigger-file "${trajectory_trigger_file}" \
+        --output "${ROBOJUDO_RECORD_DIR}/state.msgpack" \
+        --run-id "${ROBOJUDO_RUN_ID}" \
         --ready-file "${trajectory_ready_file}" &
     recorder_pid=$!
     wait_for_trajectory_recorder
@@ -59,7 +65,7 @@ wait_for_trajectory_recorder() {
     local attempt
     for attempt in {1..100}; do
         if [[ -e "${trajectory_ready_file}" ]]; then
-            echo "Trajectory recorder armed (pid=${recorder_pid})."
+            echo "Trajectory recorder ready and recording (pid=${recorder_pid})."
             return 0
         fi
         if ! kill -0 "${recorder_pid}" 2>/dev/null; then
@@ -100,6 +106,7 @@ stop_trajectory_recorder() {
         trajectory_trigger_dir=""
     fi
     unset ROBOJUDO_TRAJECTORY_START_FILE
+    unset ROBOJUDO_RECORD_DIR ROBOJUDO_RUN_ID
 }
 
 on_exit() {

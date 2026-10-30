@@ -59,6 +59,9 @@ class PolicyWrapper: # A wrapper for Policy to handle observation and action ada
     def get_pd_target(self, obs):
         action = self.policy.get_action(obs)
         pd_target = action + self.policy.default_pos
+        if getattr(self.policy, "_motion_trace_enabled", False):
+            from robojudo.tools.motion_trace import capture_target
+            capture_target(self.policy, pd_target)
         return self.actions_adapter.fit(pd_target, template=self.env_dof_cfg.default_pos)
 
     def get_init_dof_pos(self):
@@ -299,7 +302,7 @@ class RlPipeline(Pipeline):
 
         # if not dummy_env update obs info
         if not dry_run:
-            self.env.step(pd_target, extras.get("hand_pose", None))
+            self.send_traced(pd_target, extras.get("hand_pose", None), commands=commands)
 
         # output callback info to terminal
         self.post_step_callback(env_data, ctrl_data, extras, pd_target)
@@ -355,7 +358,7 @@ class RlPipeline(Pipeline):
             # print("\n")
 
             # send motor mixup action
-            self.env.step(action)
+            self.send_traced(action, phase="preparing")
 
             t4 = time.perf_counter()
 

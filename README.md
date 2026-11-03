@@ -403,64 +403,53 @@ or star our repo😁
 - [UnitreeCpp](https://github.com/HansZ8/unitree_cpp): our pybind of `unitree_sdk2` used in `UnitreeCppEnv`.
 - [ZED Proxy](https://github.com/HansZ8/ZED-Proxy/): ZED Camera Odometry Service.
 
-## G1 native Mimic v3（2026110310）
+## G1 native Mimic（共用原链路，2026110310）
 
-v3 使用独立的 `G1NativeLocoMimicV3Pipeline`。原启动名 `g1_native_loco_mimic`
-已接入 v3，保留原来的 29DoF、`g1_dance2`、1000 步、网卡和 FK 设置，
-无需导入外部 `site_profile.py` 或复制 `test29.sh`。旧实现可用
-`g1_native_loco_mimic_legacy` 回退，`g1_native_loco_mimic_v2` 保留原行为。
-23DoF 配置和独立的 `g1_native_loco_mimic_29dof` 入口维持原设置。
+23DoF、23DoF backpack 和 29DoF 共用原来的 `G1NativeLocoMimicPipeline`
+与 `packages/g1_loco_bridge`。新版运行逻辑已合入这两个原模块，
+不再使用独立 v3 Pipeline、`g1_loco_bridge_29dof` 或额外启动脚本。
+Bridge 根据 `num_dofs` 选择 23→29 电机映射或 29DoF 一一映射；23DoF 的
+六个未使用电机保持零增益。不同模型仍需匹配对应关节和观测配置。
 
-实验室 29DoF 使用原命令；先在实际控制机器的部署 Python 环境中安装新版 Bridge：
+在实际控制机器的部署 Python 环境中重新编译原包：
 
 ```bash
-python -m pip install --no-deps --no-build-isolation --force-reinstall ./packages/g1_loco_bridge_29dof
+python -m pip install --no-deps --no-build-isolation --force-reinstall ./packages/g1_loco_bridge
+```
 
-# 由现场操作者执行；启动控制程序
+Bridge 要求的 `MIMIC_SAFETY_REVISION` 是 `2026110310`，加载旧二进制会明确
+提示重编译。构建需要带 G1 AudioClient 头文件的 Unitree SDK2、CycloneDDS
+和 C++17。旧的 23DoF/v2 包保留在仓库中作为历史源码，当前 native 配置不再加载它们。
+
+实验室 29DoF 继续使用原命令，由现场操作者执行：
+
+```bash
 env -u CYCLONEDDS_URI python -u scripts/run_pipeline.py \
   -c g1_native_loco_mimic
 ```
 
-该命令直接运行控制器，不启用 `start.sh` 的轨迹录制。
+此命令直接运行控制器，不自动录制轨迹。原配置保留 `g1_dance2.onnx`、
+`max_timestep=1000`、`enP8p1s0` 和 torso FK；23DoF backpack 保留
+`eight_cut_1_backpack.onnx`、`max_timestep=11252` 及其原 FK 设置。
+`g1_native_loco_mimic_v2` 仅保留为配置兼容名，同样使用原 Pipeline 和原 Bridge，
+关闭两个自动切换开关。没有导入外部 site profile 或覆盖模型文件。
 
-23DoF 则在实际运行控制程序的机器上、用现有部署 Python 环境重新编译：
+动作交还走跑后，双腿静止满 1 秒会请求常规运控 **501**；在 500/501 下按 Start
+会请求走跑，停稳后接管。每次切换等待 2 秒、最多 3 次，FSM 变化写入
+`REGULAR_FSM_TRACE` / `WALKRUN_FSM_TRACE`。用 `return_to_regular_loco=False`
+和 `walkrun_on_start=False` 分别关闭两个自动行为。
 
-```bash
-python -m pip install --no-deps --no-build-isolation --force-reinstall ./packages/g1_loco_bridge_23dof
-```
-
-29DoF v3 改为构建 `./packages/g1_loco_bridge_29dof`；两个包要求的
-`MIMIC_SAFETY_REVISION` 都是 `2026110310`。需要带 G1 AudioClient 头文件的
-Unitree SDK2、CycloneDDS 和 C++17；记录功能另需 `unitree_sdk2py`。
-
-```bash
-# 只读配置和模型路径，不加载硬件 SDK、不启动机器人
-./run_g1.sh --check-only
-
-# 由现场操作者启动控制和同步记录
-./run_g1.sh
-```
-
-启动器使用当前仓库目录和已激活环境的 `python`，可通过 `ROBOJUDO_PYTHON`
-指定解释器，通过 `ROBOJUDO_CONFIG` 选择配置。默认是
-`g1_native_loco_mimic_23dof_backpack`；记录网卡 `UNITREE_NET_IF` 必须与配置
-中的 `env.unitree.net_if` 一致。`start.sh` 支持透传 `-c`，不带参数时仍沿用
-`run_pipeline.py` 的原默认配置。
-
-本地模型选择保留：背包配置使用 `eight_cut_1_backpack.onnx`、`max_timestep=11252`；
-新增 29DoF 配置使用已有 `g1_dance2.onnx`、`max_timestep=1000`。模型和动作长度在
-`robojudo/config/g1/g1_native_loco_mimic_cfg.py` 修改；合入时没有覆盖模型文件。
-
-v3 默认在交还走跑后静止满 1 秒请求常规运控 **501**；在 500/501 下按 Start
-会自动请求走跑，再停稳后接管。切换每次等待 2 秒、最多 3 次，FSM 变化写入
-`REGULAR_FSM_TRACE` / `WALKRUN_FSM_TRACE`。可分别用 `return_to_regular_loco=False`
-和 `walkrun_on_start=False` 关闭这两个自动行为。
-
-舞蹈中 A/Select 会等待站姿再交还，**不是急停**。交还失败后保持并等待人工接管。
+舞蹈中 A/Select 等待站姿后交还，**不是急停**。交还失败后保持并等待人工接管。
 交还请求仍先停发 LowCmd 再调用 RPC，等待期间的无命令窗口沿用回传实现。
-回传记录的 501 切换依据来自 29DoF，23DoF 真机效果需要现场确认。
+501 切换的回传依据来自 29DoF；本地检查不证明真机运行效果。
 
-离线检查入口：`tests/test_mimic_safety_offline.py`、
-`tests/run_mimic_native_offline.py`、`tests/test_g1_v3_integration.py`。
-`scripts/replay_stop_stance_offline.py` 使用实际 ONNX 和 PolicyWrapper 检查关节映射与冻结；
-`scripts/check_mimic_model.py` 可离线扫描模型参考轨迹。
+离线配置检查不加载硬件 SDK、不创建控制器：
+
+```bash
+python scripts/check_g1_native_config.py -c g1_native_loco_mimic
+```
+
+离线验证入口为 `tests/test_g1_native_integration.py`、
+`tests/test_mimic_safety_offline.py` 和 `tests/run_mimic_native_offline.py`。
+最后一个入口使用假 SDK 编译同一个 `g1_loco_bridge`，分别检查 23/29DoF。
+`scripts/replay_stop_stance_offline.py` 检查实际模型的站姿判断与参考冻结。

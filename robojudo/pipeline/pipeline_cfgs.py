@@ -94,38 +94,20 @@ class RlLocoMimicPipelineCfg(PipelineCfg):
 
 
 class G1NativeLocoMimicPipelineCfg(PipelineCfg):
-    """Switch a real G1 between its native loco and RoboJuDo mimic policies."""
+    """One native-loco/Mimic controller for both 23DoF and 29DoF G1."""
 
     pipeline_type: str = "G1NativeLocoMimicPipeline"
     robot: str = "g1"
     env: EnvCfg | Any
     ctrl: list[CtrlCfg | Any] = []
     mimic_policies: list[PolicyCfg | Any] = []
-    normal_on_motion_done: bool = False
+    return_to_regular_loco: bool = True
+    walkrun_on_start: bool = True
 
     @model_validator(mode="after")
     def check_native_loco_mimic(self):
         if not self.mimic_policies:
             raise ValueError("At least one mimic policy is required")
-        if self.normal_on_motion_done:
-            if not self.env.act:
-                raise ValueError("normal_on_motion_done requires env.act=True")
-            if not self.env.unitree.enable_normal_mode_switch or not self.env.unitree.enable_odometry:
-                raise ValueError("normal_on_motion_done requires the normal-mode switch and Unitree odometry")
-        return self
-
-
-class G1NativeLocoMimicV3PipelineCfg(G1NativeLocoMimicPipelineCfg):
-    """Versioned v3 controller; explicit legacy and v2 routes stay separate."""
-
-    pipeline_type: str = "G1NativeLocoMimicV3Pipeline"
-    return_to_regular_loco: bool = True
-    walkrun_on_start: bool = True
-
-    @model_validator(mode="after")
-    def check_v3_bridge(self):
-        if self.env.bridge_variant != "v3":
-            raise ValueError("The v3 pipeline requires bridge_variant='v3'")
-        if self.normal_on_motion_done:
-            raise ValueError("Use return_to_regular_loco for the v3 pipeline")
+        if self.return_to_regular_loco and not self.env.act:
+            raise ValueError("return_to_regular_loco requires env.act=True")
         return self

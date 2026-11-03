@@ -1,4 +1,4 @@
-"""Read a native v3 deployment config without loading a bridge or creating an env."""
+"""Read a native deployment config without loading a bridge or creating an env."""
 from __future__ import annotations
 
 import argparse
@@ -18,7 +18,7 @@ class NoHardware(importlib.abc.MetaPathFinder):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("-c", "--config", default="g1_native_loco_mimic_23dof_backpack")
+    parser.add_argument("-c", "--config", default="g1_native_loco_mimic")
     parser.add_argument("--net-if", help="Require the recorder interface to match the control config")
     args = parser.parse_args()
     sys.meta_path.insert(0, NoHardware())
@@ -27,15 +27,15 @@ def main():
     from robojudo.config.config_manager import ConfigManager
 
     cfg = ConfigManager(config_name=args.config).get_cfg()
-    if cfg.pipeline_type != "G1NativeLocoMimicV3Pipeline" or cfg.env.bridge_variant != "v3":
-        raise SystemExit("错误：此启动器需要 v3 native-loco 配置；旧入口仍可直接使用 run_pipeline.py。")
+    if cfg.pipeline_type != "G1NativeLocoMimicPipeline":
+        raise SystemExit("错误：当前配置不是 G1 native-loco 配置。")
     if cfg.env.is_sim or cfg.env.env_type != "G1LocoEnv":
         raise SystemExit("错误：当前配置不是 G1 native 真机配置。")
     if args.net_if and args.net_if != cfg.env.unitree.net_if:
         raise SystemExit(f"错误：记录网卡 {args.net_if} 与控制网卡 {cfg.env.unitree.net_if} 不一致。")
 
     dofs = len(cfg.env.dof.joint_names)
-    bridge = {23: "g1_loco_bridge_23dof", 29: "g1_loco_bridge_29dof"}[dofs]
+    bridge = "g1_loco_bridge"
     print(f"配置: {args.config}; pipeline: {cfg.pipeline_type}")
     print(f"网卡: {cfg.env.unitree.net_if}; DoF: {dofs}; bridge: {bridge}; 要求版本: 2026110310")
     print(f"regular_fsm_id: {cfg.env.unitree.regular_fsm_id}; walkrun_on_start: {cfg.walkrun_on_start}")

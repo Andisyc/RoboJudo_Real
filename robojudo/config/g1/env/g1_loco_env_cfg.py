@@ -12,7 +12,6 @@ class G1LocoUnitreeCfg(G1UnitreeCfg):
     """Configuration consumed by the RoboJuDo-owned g1_loco_bridge."""
 
     user_lowcmd_topic: str = "rt/user_lowcmd"
-    enable_normal_mode_switch: bool = False
     sdk_timeout: float = 5.0
     fsm_confirm_timeout: float = 1.0
     # Wait for FSM 500/501 after each WALKRUN -> regular loco request; the
@@ -33,9 +32,6 @@ class G1LocoEnvCfg(G1EnvCfg, UnitreeEnvCfg):
     """Real G1 environment that can hand control to and from Unitree loco."""
 
     env_type: str = "G1LocoEnv"
-    # "v3": the no-damp handoff bridge (23DoF: g1_loco_bridge_23dof, 29DoF: g1_loco_bridge_29dof).
-    # "legacy" keeps the old routing (23DoF -> g1_loco_bridge_23dof, 29DoF -> g1_loco_bridge).
-    bridge_variant: Literal["legacy", "v2", "v3"] = "legacy"
     unitree: G1LocoUnitreeCfg = G1LocoUnitreeCfg(
         net_if="eth0",
         robot="g1",

@@ -3,7 +3,7 @@
 No robot, SDK or network: the environment is replaced by perfect tracking of the
 reference (measured joints = reference joints, mapped to env/motor order by name).
 Checks:
-  1. G1NativeLocoMimicV3Pipeline._at_stance agrees, frame by frame, with a stance check
+  1. G1NativeLocoMimicPipeline._at_stance agrees, frame by frame, with a stance check
      done directly on joint names;
   2. freezing the reference reaches the wrapped policy (timestep stops advancing).
 
@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from robojudo.config.config_manager import ConfigManager  # noqa: E402
-from robojudo.pipeline.g1_native_loco_mimic_v3_pipeline import G1NativeLocoMimicV3Pipeline as P  # noqa: E402
+from robojudo.pipeline.g1_native_loco_mimic_pipeline import G1NativeLocoMimicPipeline as P  # noqa: E402
 from robojudo.pipeline.rl_pipeline import PolicyWrapper  # noqa: E402
 from robojudo.tools.dof import DoFAdapter  # noqa: E402
 

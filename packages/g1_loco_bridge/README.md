@@ -1,61 +1,46 @@
 # g1_loco_bridge
 
-`g1_loco_bridge` is the RoboJuDo-owned C++ boundary for temporarily handing a
-Unitree G1 from its internal locomotion controller to user DDS control and back.
-It links against the robot's installed official `unitree_sdk2`; it does not
-modify or wrap the third-party `packages/unitree_cpp` module.
+This is the single RoboJuDo native-locomotion/Mimic bridge for both 23DoF and
+29DoF G1. `G1NativeLocoMimicPipeline` owns the Python state machine. This package
+owns SDK/DDS, motor mapping, control authority and confirmed FSM transitions.
+The 2026110310 implementation is integrated into this original package; no
+separately named 29DoF bridge is required.
 
-The controller starts read-only. Constructing it subscribes to robot state and
-queries the locomotion FSM, but does not call `SwitchToUserCtrl()` and does not
-publish `rt/user_lowcmd`. An explicit acquire requires native `WALKRUN`,
-continuously publishes the first fully framed policy target during the direct
-user-control request, and confirms FSM ID `1000` before reporting that user
-control is active.
-
-Install on the G1 computer after installing a compatible official SDK2:
+Build in the Python environment that runs the controller, on the G1 computer:
 
 ```bash
-python -m pip install -e packages/g1_loco_bridge
+python -m pip install --no-deps --no-build-isolation --force-reinstall ./packages/g1_loco_bridge
 ```
 
-The build requires the installed header
-`unitree/robot/g1/loco/g1_loco_client.hpp` and `libunitree_sdk2.so`.
+Requires Unitree SDK2 with G1 LocoClient and AudioClient headers, CycloneDDS
+C/C++ and C++17. The package exports `MIMIC_SAFETY_REVISION = 2026110310`.
+Constructing a controller subscribes to state and queries the FSM; only an
+explicit acquire requests user control and starts LowCmd publishing.
 
-Do not construct `G1LocoController` and the legacy `unitree_cpp.UnitreeController`
-in the same process. A deployment must choose exactly one low-level DDS owner.
+`num_dofs=29` uses the full motor array directly. `num_dofs=23` maps joints to
+indices 0–11, 12, 15–19 and 22–26; the six unused motors have zero gains.
+RoboJuDo passes this value from the selected robot configuration. Do not
+construct another low-level DDS owner alongside this controller.
 
-RoboJuDo integration uses the isolated `g1_native_loco_mimic` configuration:
-
-```bash
-python scripts/run_pipeline.py -c g1_native_loco_mimic
-```
-
-The process starts in Unitree native locomotion. On the Unitree remote, `Start`
-performs the direct `WALKRUN -> USER_CTRL` handoff and enters the selected dance,
-`Select` returns to native `WALKRUN`, `R1`/`L1` select the next/previous dance
-while native locomotion is active, and `A` confirms `PASSIVE` before closing the
-bridge.
-
-For the legacy 29DoF `g1_native_loco_mimic` configuration, natural motion
-completion now returns to WALKRUN, waits for fresh state and a stationary
-robot, then calls `switch_walkrun_to_normal()` once. Success requires three
-consecutive FSM 500 confirmations. Select still returns only to WALKRUN;
-A still confirms PASSIVE before closing. The 23DoF and v2 configurations do
-not enable automatic NORMAL switching.
-
-Rebuild this package on the robot after updating the sources:
+The lab 29DoF command remains:
 
 ```bash
-python -m pip install -e packages/g1_loco_bridge
 env -u CYCLONEDDS_URI python -u scripts/run_pipeline.py -c g1_native_loco_mimic
 ```
 
-After automatic switching, ordinary process cleanup preserves the internal
-mode. No failed switch is automatically retried or rolled back. Return the
-robot to WALKRUN before pressing Start for another motion. The network
-interface remains configured in `g1_native_loco_mimic_cfg.py`.
+Start in regular locomotion requests WALKRUN before entering Mimic. Motion
+completion or A/Select during a dance waits for a stance before handing back.
+After WALKRUN settles, the pipeline requests the configured regular FSM (501
+in the default lab configuration). Failed handbacks retain the hold target
+and wait for the operator. A/Select is not an emergency stop.
 
-The default `Dance_wose` policy has no configured end frame and will not emit
-natural completion. For a bounded lab test, press R1 once to select `Violin`
-(500 policy timesteps), then press Start. Its natural completion triggers the
-automatic switch; Select deliberately does not.
+Always close through the pipeline: native `close()` only stops local resources
+and does not request Damp/PASSIVE. The handback RPC still follows a temporary
+stop in LowCmd publishing, as in the supplied implementation.
+
+The former `switch_walkrun_to_normal()`/FSM 500 path has been replaced by
+`switch_walkrun_to_regular()` with confirmed, traced FSM switching. Rebuild
+after pulling this update; an old binary cannot supply the new API.
+
+See the repository README for configuration and offline checks. No local
+offline check establishes real-hardware deployment behavior.

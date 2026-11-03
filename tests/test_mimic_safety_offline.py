@@ -27,7 +27,7 @@ def gravity(q):
     return np.array([0,0,-(1-2*(x*x+y*y))])
 
 ns = dict(np=np, Enum=Enum, auto=auto, Pipeline=FakeBase,
-          G1NativeLocoMimicV3PipelineCfg=object, logger=logging.getLogger('test'),
+          G1NativeLocoMimicPipelineCfg=object, logger=logging.getLogger('test'),
           MimicSafetyGuard=Guard, SafetySpeaker=safety.SafetySpeaker, SafetyViolation=Violation,
           WARNING_TEXT=safety.WARNING_TEXT, NOT_WALKRUN_TEXT=safety.NOT_WALKRUN_TEXT,
           STOPPED_TEXT=safety.STOPPED_TEXT, STOPPING_TEXT=safety.STOPPING_TEXT, HOLD_TEXT=safety.HOLD_TEXT,
@@ -36,9 +36,9 @@ ns = dict(np=np, Enum=Enum, auto=auto, Pipeline=FakeBase,
           WALKRUN_FAILED_TEXT=safety.WALKRUN_FAILED_TEXT, WALKRUN_UNSTEADY_TEXT=safety.WALKRUN_UNSTEADY_TEXT,
           get_gravity_orientation=gravity, time=NS(sleep=lambda _:None, monotonic=lambda:CLOCK[0]))
 CLOCK=[1000.]
-load_classes(ROOT/'robojudo/pipeline/g1_native_loco_mimic_v3_pipeline.py',
-             ['NativeLocoMimicState','G1NativeLocoMimicV3Pipeline'], ns)
-P, State = ns['G1NativeLocoMimicV3Pipeline'], ns['NativeLocoMimicState']
+load_classes(ROOT/'robojudo/pipeline/g1_native_loco_mimic_pipeline.py',
+             ['NativeLocoMimicState','G1NativeLocoMimicPipeline'], ns)
+P, State = ns['G1NativeLocoMimicPipeline'], ns['NativeLocoMimicState']
 
 class Env:
     def __init__(self, yaw, names=None):

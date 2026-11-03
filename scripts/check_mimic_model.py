@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 from robojudo.tools.mimic_safety import JOINT_LIMITS, JOINT_LIMITS_29  # noqa: E402
 
-# Keep in sync with G1NativeLocoMimicV3Pipeline.STANCE_*.
+# Keep in sync with G1NativeLocoMimicPipeline.STANCE_*.
 LEG_KEYS = ("hip", "knee", "ankle", "waist")
 LEG_TOL, HEIGHT_TOL, REF_VEL, STOP_WAIT_S = 0.35, 0.03, 0.6, 20.0
 FREQ = 50

@@ -10,50 +10,19 @@ from robojudo.environment.env_cfgs import UnitreeEnvCfg
 from robojudo.utils.util_func import quat_rotate_inverse_np
 
 
-def _load_g1_loco_bridge(num_dofs: int, bridge_variant: str = "legacy"):
-    """Select the firmware variant explicitly; preserve legacy DoF routing."""
-    if bridge_variant == "v2":
-        if num_dofs != 29:
-            raise ValueError("g1_loco_bridge_v2 requires the 29DoF environment")
-        from g1_loco_bridge_v2 import (  # type: ignore
-            AuthorityState,
-            G1LocoController,
-            RobotState,
-            SportState,
+def _load_g1_loco_bridge(num_dofs: int):
+    """Load the single native bridge; the controller owns the DoF mapping."""
+    if num_dofs not in (23, 29):
+        raise ValueError("G1 loco bridge requires 23 or 29 DoF")
+    import g1_loco_bridge as bridge
+
+    if getattr(bridge, "MIMIC_SAFETY_REVISION", None) != 2026110310:
+        raise RuntimeError(
+            "Rebuild packages/g1_loco_bridge in the running Python environment: "
+            "MIMIC_SAFETY_REVISION must be 2026110310"
         )
-    elif bridge_variant == "v3" and num_dofs == 29:
-        # Same controller source as the 23DoF bridge, built as its own module.
-        from g1_loco_bridge_29dof import MIMIC_SAFETY_REVISION
-        if MIMIC_SAFETY_REVISION != 2026110310:
-            raise RuntimeError("Rebuild g1_loco_bridge_29dof: MIMIC_SAFETY_REVISION mismatch")
-        from g1_loco_bridge_29dof import (  # type: ignore
-            AuthorityState,
-            G1LocoController,
-            RobotState,
-            SportState,
-        )
-    elif bridge_variant not in ("legacy", "v3"):
-        raise ValueError(f"Unknown G1 Bridge variant: {bridge_variant}")
-    elif num_dofs == 23:
-        from g1_loco_bridge_23dof import MIMIC_SAFETY_REVISION
-        if MIMIC_SAFETY_REVISION != 2026110310:
-            raise RuntimeError("Rebuild g1_loco_bridge_23dof: MIMIC_SAFETY_REVISION mismatch")
-        from g1_loco_bridge_23dof import (  # type: ignore
-            AuthorityState,
-            G1LocoController,
-            RobotState,
-            SportState,
-        )
-    elif bridge_variant == "v3":
-        raise ValueError("bridge_variant 'v3' requires a 23DoF or 29DoF environment")
-    else:
-        from g1_loco_bridge import (  # type: ignore
-            AuthorityState,
-            G1LocoController,
-            RobotState,
-            SportState,
-        )
-    return AuthorityState, G1LocoController, RobotState, SportState
+    return (bridge.AuthorityState, bridge.G1LocoController,
+            bridge.RobotState, bridge.SportState)
 
 
 logger = logging.getLogger(__name__)
@@ -82,16 +51,7 @@ class G1LocoEnv(Environment):
             self._G1LocoController,
             self._RobotState,
             self._SportState,
-        ) = _load_g1_loco_bridge(self.num_dofs, cfg_env.bridge_variant)
-        if cfg_unitree.enable_normal_mode_switch:
-            if not cfg_unitree.enable_odometry:
-                raise ValueError("The normal-mode switch requires Unitree odometry")
-            required = ("switch_walkrun_to_normal", "close_preserving_internal_mode")
-            if not all(hasattr(self._G1LocoController, name) for name in required):
-                raise RuntimeError(
-                    "Installed G1 Bridge is missing the normal-mode interface; "
-                    "rebuild the selected g1_loco_bridge package before starting"
-                )
+        ) = _load_g1_loco_bridge(self.num_dofs)
         self.robot_state = None
         self.sport_state = None
 
@@ -264,18 +224,6 @@ class G1LocoEnv(Environment):
     def release_to_passive(self) -> int:
         return self._handoff("PASSIVE", self.unitree.release_to_passive)
 
-    def switch_walkrun_to_normal(self) -> dict:
-        if not self.enabled:
-            raise RuntimeError("Cannot switch WALKRUN to NORMAL with act=False")
-        method = getattr(self.unitree, "switch_walkrun_to_normal", None)
-        if not callable(method):
-            raise RuntimeError("G1 Bridge lacks switch_walkrun_to_normal; rebuild the selected Bridge package")
-        before = self.get_control_status()
-        result = method().to_dict()
-        logger.warning("G1 WALKRUN to NORMAL: result=%s before=%s after=%s",
-                       result, before, self.get_control_status())
-        return result
-
     def _fsm_trace(self):
         # (seconds since the switch began, request attempt, FSM id or -|query error|,
         # FSM mode or -1), one entry per change; attempt 0 is before the first request.
@@ -317,13 +265,10 @@ class G1LocoEnv(Environment):
             raise RuntimeError("G1LocoEnv active LowCmd was not published")
         return publish_count
 
-    def shutdown(self, *, preserve_internal_mode: bool = False) -> int:
+    def shutdown(self) -> int:
         if not hasattr(self, "unitree"):
             return 0
-        if preserve_internal_mode:
-            result = int(self.unitree.close_preserving_internal_mode())
-        else:
-            result = int(self.unitree.close())
+        result = int(self.unitree.close())
         if result == 0:
             self.enabled = False
         else:

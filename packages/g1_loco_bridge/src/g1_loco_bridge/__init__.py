@@ -1,5 +1,5 @@
 from ._g1_loco_bridge import (
-    NormalModeSwitchResult,
+    MIMIC_SAFETY_REVISION,
     AuthorityState,
     G1LocoConfig,
     G1LocoController,
@@ -10,7 +10,7 @@ from ._g1_loco_bridge import (
 )
 
 __all__ = [
-    "NormalModeSwitchResult",
+    "MIMIC_SAFETY_REVISION",
     "AuthorityState",
     "G1LocoConfig",
     "G1LocoController",
@@ -19,4 +19,3 @@ __all__ = [
     "RobotState",
     "SportState",
 ]
-

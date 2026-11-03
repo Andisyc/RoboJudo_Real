@@ -36,7 +36,7 @@ class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
         G1BeyondMimicPolicyCfg(
             policy_name="g1_dance2", 
             without_state_estimator=False, 
-            max_timestep=850
+            max_timestep=1000
         ),
         # G1BeyondMimicPolicyCfg(
         #     policy_name="Dance_wose", without_state_estimator=True

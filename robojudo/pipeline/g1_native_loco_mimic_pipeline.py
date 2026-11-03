@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from enum import Enum, auto
 
 import numpy as np
@@ -58,6 +59,9 @@ class G1NativeLocoMimicPipeline(Pipeline):
         self.dt = 1.0 / self.freq
         self.state = NativeLocoMimicState.NATIVE_LOCO
         self.should_stop = False
+        self.last_normal_mode_switch = None
+        self._preserve_internal_mode_on_exit = False
+        self._non_realtime_step_s = 0.0
 
         self.self_check()
         self.reset()
@@ -136,16 +140,17 @@ class G1NativeLocoMimicPipeline(Pipeline):
             raise RuntimeError(f"G1 user control was not armed: {status}")
 
         self.state = NativeLocoMimicState.MIMIC_ACTIVE
+        self._preserve_internal_mode_on_exit = False
         self.trace_event("native_state", state=self.state.name)
         logger.warning("G1 user control acquired; mimic policy active: %s", status)
         return extras, pd_target
 
     def _return_to_native_loco(self):
         if self.state == NativeLocoMimicState.NATIVE_LOCO:
-            return
+            return True
         if self.state != NativeLocoMimicState.MIMIC_ACTIVE:
             logger.error("Cannot return to native loco from state %s", self.state.name)
-            return
+            return False
 
         result = self.env.release_to_walkrun()
         if result == 0:
@@ -157,12 +162,12 @@ class G1NativeLocoMimicPipeline(Pipeline):
                 "Control returned to Unitree WALKRUN: %s",
                 self.env.get_control_status(),
             )
-            return
+            return True
 
         if self.env.has_user_control:
             self.state = NativeLocoMimicState.MIMIC_ACTIVE
             logger.error("Unitree WALKRUN handoff failed; retaining user control: %s", result)
-            return
+            return False
 
         self.state = NativeLocoMimicState.FAULT
         self.should_stop = True
@@ -171,7 +176,52 @@ class G1NativeLocoMimicPipeline(Pipeline):
             f"status={self.env.get_control_status()}"
         )
 
+    def _complete_mimic(self):
+        handoff_started = time.perf_counter()
+        if not self._return_to_native_loco() or not self.cfg.normal_on_motion_done:
+            return
+        status = self.env.get_control_status()
+        if status["authority_state"] != "INTERNAL" or status["publish_enabled"]:
+            self.state = NativeLocoMimicState.FAULT
+            self.should_stop = True
+            raise RuntimeError(f"Cannot switch to NORMAL before user control is released: {status}")
+
+        # Release disables publishing before its blocking SDK call. Account for
+        # that wait only after the handoff has actually been confirmed.
+        self._non_realtime_step_s += time.perf_counter() - handoff_started
+        # Exit cleanup must not undo the official mode, even if its query fails.
+        # Explicit A shutdown still follows the original PASSIVE path.
+        self._preserve_internal_mode_on_exit = True
+        started = time.perf_counter()
+        try:
+            result = self.env.switch_walkrun_to_normal()
+        except Exception:
+            self.state = NativeLocoMimicState.FAULT
+            self.should_stop = True
+            raise
+        finally:
+            self._non_realtime_step_s += time.perf_counter() - started
+        self.last_normal_mode_switch = result
+        self.trace_event("normal_mode_switch", **result)
+        if result["code"] == 0 and result["target_confirmed"] and result["observed_fsm"] == 500:
+            logger.warning("Mimic finished; Unitree NORMAL (500) confirmed. "
+                           "Return to WALKRUN before starting another mimic.")
+        else:
+            logger.error("Automatic NORMAL switch was not confirmed; no retry or rollback: %s", result)
+            if self.env.has_authority_fault:
+                self.state = NativeLocoMimicState.FAULT
+                self.should_stop = True
+
+    def consume_non_realtime_step_time(self) -> float:
+        elapsed = self._non_realtime_step_s
+        self._non_realtime_step_s = 0.0
+        status = self.env.get_control_status()
+        if self.env.has_user_control or status["publish_enabled"]:
+            return 0.0
+        return elapsed
+
     def _shutdown(self):
+        self._preserve_internal_mode_on_exit = False
         result = self.close()
         if result != 0:
             raise RuntimeError(
@@ -181,7 +231,10 @@ class G1NativeLocoMimicPipeline(Pipeline):
     def close(self) -> int:
         if self.state == NativeLocoMimicState.CLOSED:
             return 0
-        result = self.env.shutdown()
+        if self._preserve_internal_mode_on_exit:
+            result = self.env.shutdown(preserve_internal_mode=True)
+        else:
+            result = self.env.shutdown()
         if result == 0:
             self.state = NativeLocoMimicState.CLOSED
             self.should_stop = True
@@ -235,6 +288,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
         self.should_stop = True
 
     def step(self, dry_run: bool = False):
+        self._non_realtime_step_s = 0.0
         if self.state == NativeLocoMimicState.CLOSED:
             return
 
@@ -271,7 +325,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
             step_state == NativeLocoMimicState.MIMIC_ACTIVE
             and "[MOTION_DONE]" in extras.get("CALLBACK", [])
         ):
-            self._return_to_native_loco()
+            self._complete_mimic()
 
         self._safety_check()
         if self.cfg.debug.log_obs:

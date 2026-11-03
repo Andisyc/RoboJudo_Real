@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -47,7 +48,9 @@ G1LocoController::G1LocoController(const G1LocoConfig& config)
     throw std::invalid_argument(
         "stiffness and damping must match num_dofs");
   }
-  if (config_.control_dt <= 0.0 || config_.fsm_confirm_timeout <= 0.0 ||
+  if (!std::isfinite(config_.control_dt) || !std::isfinite(config_.fsm_confirm_timeout) ||
+      !std::isfinite(config_.sdk_timeout) ||
+      config_.control_dt <= 0.0 || config_.fsm_confirm_timeout <= 0.0 ||
       config_.sdk_timeout <= 0.0) {
     throw std::invalid_argument("controller timeouts and control_dt must be positive");
   }
@@ -183,6 +186,10 @@ void G1LocoController::LowStateHandler(const void* message) {
 
   RobotState state(num_dofs_);
   state.tick = low_state.tick();
+  const auto previous_state = robot_state_buffer_.GetData();
+  state.received_at_s = previous_state && previous_state->tick == state.tick
+      ? previous_state->received_at_s
+      : std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
   for (std::size_t i = 0; i < num_dofs_; ++i) {
     state.motor_state.q.at(i) = low_state.motor_state().at(i).q();
     state.motor_state.dq.at(i) = low_state.motor_state().at(i).dq();
@@ -211,6 +218,8 @@ void G1LocoController::LowStateHandler(const void* message) {
 void G1LocoController::SportStateHandler(const void* message) {
   const auto& dds_state = *static_cast<const DdsSportState*>(message);
   SportState state;
+  state.received_at_s = std::chrono::duration<double>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
   state.position = dds_state.position();
   state.velocity = dds_state.velocity();
   sport_state_buffer_.SetData(state);
@@ -543,6 +552,87 @@ int32_t G1LocoController::ReleaseToInternalLocked(
   return query_result == 0 ? release_result : kBridgeFsmQueryFailed;
 }
 
+robojudo::normal_mode::Result G1LocoController::switch_walkrun_to_normal() {
+  std::lock_guard<std::mutex> lock(authority_mutex_);
+  using namespace robojudo::normal_mode;
+  Result result;
+  auto reject = [&](int32_t code, const char* reason) {
+    result.code = code;
+    result.reason = reason;
+    last_normal_mode_switch_ = result;
+    return result;
+  };
+  if (closed_.load()) return reject(robojudo::normal_mode::CLOSED, "controller is closed");
+  if (authority_state_.load() != AuthorityState::INTERNAL ||
+      owns_user_control_.load() || publish_enabled_.load())
+    return reject(INVALID_AUTHORITY, "requires INTERNAL authority and no user publisher");
+
+  if (!config_.enable_normal_mode_switch)
+    return reject(DISABLED, "enable_normal_mode_switch is false");
+  if (!config_.enable_odometry)
+    return reject(STALE_STATE, "enable_odometry and fresh SportState are required");
+
+  Limits limits;
+  limits.confirm_timeout_s = config_.fsm_confirm_timeout;
+  const auto now = []() {
+    return std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+  };
+  auto query = [&](int32_t& fsm) {
+    const int32_t code = QueryFsmIdLocked(fsm);
+    if (code != 0) cached_fsm_id_.store(-1);
+    return code;
+  };
+  auto request = [&]() {
+    const int32_t code = loco_client_->Start();
+    last_loco_api_result_.store(code);
+    return code;
+  };
+  auto sample = [&]() {
+    MotionSample value;
+    const auto robot = robot_state_buffer_.GetData();
+    const auto sport = sport_state_buffer_.GetData();
+    const double time = now();
+    if (!robot || !sport || robot->received_at_s <= 0 || sport->received_at_s <= 0 ||
+        time - robot->received_at_s > 0.25 || time - sport->received_at_s > 0.25)
+      return value;
+    value.fresh = true;
+    value.xy_speed = std::hypot(sport->velocity[0], sport->velocity[1]);
+    const auto& gyro = robot->imu_state.gyroscope;
+    value.angular_speed = std::sqrt(gyro[0]*gyro[0] + gyro[1]*gyro[1] + gyro[2]*gyro[2]);
+    value.tilt = std::hypot(robot->imu_state.rpy[0], robot->imu_state.rpy[1]);
+    for (std::size_t i = 0; i < 12; ++i) {
+      const double speed = std::abs(robot->motor_state.dq.at(i));
+      if (!std::isfinite(speed)) { value.max_joint_speed = speed; break; }
+      value.max_joint_speed = std::max(value.max_joint_speed, speed);
+    }
+    return value;
+  };
+  try {
+    result = Run(query, request, sample,
+        [](int32_t fsm) { return fsm == kWalkRunFsmId; }, now,
+        [](double seconds) { std::this_thread::sleep_for(std::chrono::duration<double>(seconds)); },
+        limits);
+  } catch (const std::exception& error) {
+    result.code = QUERY_FAILED;
+    result.reason = std::string("transition exception: ") + error.what();
+    result.observed_fsm = -1;
+  }
+  if (result.observed_fsm < 0 || result.observed_fsm == kUserControlFsmId) {
+    cached_fsm_id_.store(result.observed_fsm);
+    authority_state_.store(AuthorityState::FAULT);
+  }
+  // Ownership remains INTERNAL unless state is unknown/external USER_CTRL.
+  // Never reacquire user control, retry Start, rollback, or call Damp here.
+  last_normal_mode_switch_ = result;
+  return result;
+}
+
+robojudo::normal_mode::Result G1LocoController::get_last_normal_mode_switch() const {
+  std::lock_guard<std::mutex> lock(authority_mutex_);
+  return last_normal_mode_switch_;
+}
+
 int32_t G1LocoController::release_to_walkrun() {
   std::lock_guard<std::mutex> lock(authority_mutex_);
   return ReleaseToInternalLocked(
@@ -594,6 +684,22 @@ void G1LocoController::set_gains(
   }
   stiffness_ = stiffness;
   damping_ = damping;
+}
+
+int32_t G1LocoController::close_preserving_internal_mode() {
+  std::lock_guard<std::mutex> lock(authority_mutex_);
+  if (closed_.load()) return 0;
+  if (owns_user_control_.load() || publish_enabled_.load() ||
+      authority_state_.load() == AuthorityState::ACQUIRING ||
+      authority_state_.load() == AuthorityState::RELEASING)
+    return kBridgeInvalidState;
+  // Local teardown only: no FSM queries/requests and no remote mode changes.
+  DisablePublishingLocked();
+  ClearCommandLocked();
+  closed_.store(true);
+  initialized_.store(false);
+  authority_state_.store(AuthorityState::CLOSED);
+  return 0;
 }
 
 int32_t G1LocoController::close() {

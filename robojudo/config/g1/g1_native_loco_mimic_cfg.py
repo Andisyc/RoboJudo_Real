@@ -17,8 +17,9 @@ class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
     """Unitree native WALKRUN with explicit handoff to RoboJuDo dances."""
 
     env: G1LocoEnvCfg = G1LocoEnvCfg(
-        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0"),
+        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0", enable_normal_mode_switch=True),
     )
+    normal_on_motion_done: bool = True
     ctrl: list[UnitreeCtrlCfg] = [
         UnitreeCtrlCfg(
             combination_init_buttons=[],
@@ -49,6 +50,7 @@ class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
 class g1_native_loco_mimic_v2(g1_native_loco_mimic):
     """29DoF native loco handoff using the FSM 801/802-compatible Bridge."""
 
+    normal_on_motion_done: bool = False
     env: G1LocoEnvCfg = G1LocoEnvCfg(
         bridge_variant="v2",
         unitree=G1LocoUnitreeCfg(net_if="enP8p1s0"),

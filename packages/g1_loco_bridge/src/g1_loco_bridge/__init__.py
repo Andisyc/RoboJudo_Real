@@ -1,4 +1,5 @@
 from ._g1_loco_bridge import (
+    NormalModeSwitchResult,
     AuthorityState,
     G1LocoConfig,
     G1LocoController,
@@ -9,6 +10,7 @@ from ._g1_loco_bridge import (
 )
 
 __all__ = [
+    "NormalModeSwitchResult",
     "AuthorityState",
     "G1LocoConfig",
     "G1LocoController",

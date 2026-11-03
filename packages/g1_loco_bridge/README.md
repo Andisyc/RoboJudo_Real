@@ -35,3 +35,27 @@ performs the direct `WALKRUN -> USER_CTRL` handoff and enters the selected dance
 `Select` returns to native `WALKRUN`, `R1`/`L1` select the next/previous dance
 while native locomotion is active, and `A` confirms `PASSIVE` before closing the
 bridge.
+
+For the legacy 29DoF `g1_native_loco_mimic` configuration, natural motion
+completion now returns to WALKRUN, waits for fresh state and a stationary
+robot, then calls `switch_walkrun_to_normal()` once. Success requires three
+consecutive FSM 500 confirmations. Select still returns only to WALKRUN;
+A still confirms PASSIVE before closing. The 23DoF and v2 configurations do
+not enable automatic NORMAL switching.
+
+Rebuild this package on the robot after updating the sources:
+
+```bash
+python -m pip install -e packages/g1_loco_bridge
+env -u CYCLONEDDS_URI python -u scripts/run_pipeline.py -c g1_native_loco_mimic
+```
+
+After automatic switching, ordinary process cleanup preserves the internal
+mode. No failed switch is automatically retried or rolled back. Return the
+robot to WALKRUN before pressing Start for another motion. The network
+interface remains configured in `g1_native_loco_mimic_cfg.py`.
+
+The default `Dance_wose` policy has no configured end frame and will not emit
+natural completion. For a bounded lab test, press R1 once to select `Violin`
+(500 policy timesteps), then press Start. Its natural completion triggers the
+automatic switch; Select deliberately does not.

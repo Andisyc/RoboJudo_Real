@@ -12,6 +12,7 @@ class G1LocoUnitreeCfg(G1UnitreeCfg):
     """Configuration consumed by the RoboJuDo-owned g1_loco_bridge."""
 
     user_lowcmd_topic: str = "rt/user_lowcmd"
+    enable_normal_mode_switch: bool = False
     sdk_timeout: float = 5.0
     fsm_confirm_timeout: float = 1.0
 

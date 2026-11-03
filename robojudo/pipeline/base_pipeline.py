@@ -101,3 +101,7 @@ class Pipeline(ABC):
 
     def safety_check(self):
         return
+
+    def consume_non_realtime_step_time(self) -> float:
+        """Seconds spent in a confirmed handoff with no local motor publisher."""
+        return 0.0

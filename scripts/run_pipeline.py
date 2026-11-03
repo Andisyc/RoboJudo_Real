@@ -68,19 +68,23 @@ def main():
 
         # continue execute step
         while not getattr(pipeline, "should_stop", False):
-            time_start = time.time()
+            time_start = time.perf_counter()
             pipeline.step()
-            time_end = time.time()
-            time_diff = time_end - time_start
+            elapsed = time.perf_counter() - time_start
+            handoff_wait = pipeline.consume_non_realtime_step_time()
 
             # keep the pipeline running at the desired frequency
             if not cfg.run_fullspeed:
-                time_diff = pipeline.dt - time_diff
+                time_diff = pipeline.dt - elapsed
                 if time_diff > 0:
                     time.sleep(time_diff)
                 elif not cfg.env.is_sim:
-                    logger.error(f"Warning: frame drop -> {time_diff}")
-                    if time_diff < -0.2:
+                    # Only released-control mode switching may be excluded;
+                    # inference and motor publishing retain the same watchdog.
+                    control_time_diff = pipeline.dt - (elapsed - handoff_wait)
+                    if control_time_diff < 0:
+                        logger.error(f"Warning: frame drop -> {control_time_diff}")
+                    if control_time_diff < -0.2:
                         logger.critical("Exiting due to excessive frame drop")
                         pipeline.env.shutdown()
                         time.sleep(10)

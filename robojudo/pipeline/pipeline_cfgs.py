@@ -101,9 +101,15 @@ class G1NativeLocoMimicPipelineCfg(PipelineCfg):
     env: EnvCfg | Any
     ctrl: list[CtrlCfg | Any] = []
     mimic_policies: list[PolicyCfg | Any] = []
+    normal_on_motion_done: bool = False
 
     @model_validator(mode="after")
     def check_native_loco_mimic(self):
         if not self.mimic_policies:
             raise ValueError("At least one mimic policy is required")
+        if self.normal_on_motion_done:
+            if not self.env.act:
+                raise ValueError("normal_on_motion_done requires env.act=True")
+            if not self.env.unitree.enable_normal_mode_switch or not self.env.unitree.enable_odometry:
+                raise ValueError("normal_on_motion_done requires the normal-mode switch and Unitree odometry")
         return self

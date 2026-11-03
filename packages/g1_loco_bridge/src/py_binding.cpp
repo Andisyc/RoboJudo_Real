@@ -40,6 +40,8 @@ G1LocoConfig ConfigFromDict(const py::dict& config) {
       GetOr<bool>(config, "enable_torso_imu", result.enable_torso_imu);
   result.torso_imu_topic = GetOr<std::string>(
       config, "torso_imu_topic", result.torso_imu_topic);
+  result.enable_normal_mode_switch = GetOr<bool>(
+      config, "enable_normal_mode_switch", result.enable_normal_mode_switch);
   result.sdk_timeout =
       GetOr<double>(config, "sdk_timeout", result.sdk_timeout);
   result.fsm_confirm_timeout = GetOr<double>(
@@ -64,6 +66,35 @@ PYBIND11_MODULE(_g1_loco_bridge, module) {
       .value("CLOSED", AuthorityState::CLOSED)
       .export_values();
 
+  using NormalResult = robojudo::normal_mode::Result;
+  py::class_<NormalResult>(module, "NormalModeSwitchResult")
+      .def_readonly("code", &NormalResult::code)
+      .def_readonly("stage", &NormalResult::stage)
+      .def_readonly("reason", &NormalResult::reason)
+      .def_readonly("before_fsm", &NormalResult::before_fsm)
+      .def_readonly("observed_fsm", &NormalResult::observed_fsm)
+      .def_readonly("sdk_request_result", &NormalResult::sdk_request_result)
+      .def_readonly("sdk_query_result", &NormalResult::sdk_query_result)
+      .def_readonly("request_sent", &NormalResult::request_sent)
+      .def_readonly("request_returned", &NormalResult::request_returned)
+      .def_readonly("target_confirmed", &NormalResult::target_confirmed)
+      .def_readonly("elapsed_s", &NormalResult::elapsed_s)
+      .def("to_dict", [](const NormalResult& r) {
+        py::dict d;
+        d["code"] = r.code;
+        d["stage"] = r.stage;
+        d["reason"] = r.reason;
+        d["before_fsm"] = r.before_fsm;
+        d["observed_fsm"] = r.observed_fsm;
+        d["sdk_request_result"] = r.sdk_request_result;
+        d["sdk_query_result"] = r.sdk_query_result;
+        d["request_sent"] = r.request_sent;
+        d["request_returned"] = r.request_returned;
+        d["target_confirmed"] = r.target_confirmed;
+        d["elapsed_s"] = r.elapsed_s;
+        return d;
+      });
+
   py::class_<G1LocoConfig>(module, "G1LocoConfig")
       .def(py::init<>())
       .def_readwrite("net_if", &G1LocoConfig::net_if)
@@ -78,6 +109,7 @@ PYBIND11_MODULE(_g1_loco_bridge, module) {
       .def_readwrite("enable_torso_imu",
                      &G1LocoConfig::enable_torso_imu)
       .def_readwrite("torso_imu_topic", &G1LocoConfig::torso_imu_topic)
+      .def_readwrite("enable_normal_mode_switch", &G1LocoConfig::enable_normal_mode_switch)
       .def_readwrite("sdk_timeout", &G1LocoConfig::sdk_timeout)
       .def_readwrite("fsm_confirm_timeout",
                      &G1LocoConfig::fsm_confirm_timeout)
@@ -135,6 +167,9 @@ PYBIND11_MODULE(_g1_loco_bridge, module) {
            &G1LocoController::acquire_user_control,
            py::arg("initial_pd_target"),
            py::call_guard<py::gil_scoped_release>())
+      .def("switch_walkrun_to_normal", &G1LocoController::switch_walkrun_to_normal,
+           py::call_guard<py::gil_scoped_release>())
+      .def("get_last_normal_mode_switch", &G1LocoController::get_last_normal_mode_switch)
       .def("release_to_walkrun", &G1LocoController::release_to_walkrun,
            py::call_guard<py::gil_scoped_release>())
       .def("release_to_passive", &G1LocoController::release_to_passive,
@@ -142,6 +177,8 @@ PYBIND11_MODULE(_g1_loco_bridge, module) {
       .def("step", &G1LocoController::step, py::arg("pd_target"))
       .def("set_gains", &G1LocoController::set_gains,
            py::arg("stiffness"), py::arg("damping"))
+      .def("close_preserving_internal_mode", &G1LocoController::close_preserving_internal_mode,
+           py::call_guard<py::gil_scoped_release>())
       .def("close", &G1LocoController::close,
            py::call_guard<py::gil_scoped_release>());
 

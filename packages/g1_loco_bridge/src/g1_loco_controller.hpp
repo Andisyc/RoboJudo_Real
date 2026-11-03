@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "normal_mode_switch.hpp"
+
 #include <unitree/idl/go2/SportModeState_.hpp>
 #include <unitree/idl/hg/IMUState_.hpp>
 #include <unitree/idl/hg/LowCmd_.hpp>
@@ -78,6 +80,7 @@ struct G1LocoConfig {
   bool enable_torso_imu = false;
   std::string torso_imu_topic = "rt/secondary_imu";
 
+  bool enable_normal_mode_switch = false;
   double sdk_timeout = 5.0;
   double fsm_confirm_timeout = 1.0;
 
@@ -123,6 +126,7 @@ struct RobotState {
     wireless_remote.fill(0);
   }
 
+  double received_at_s = 0;
   uint32_t tick = 0;
   MotorState motor_state;
   ImuState imu_state;
@@ -131,6 +135,7 @@ struct RobotState {
 };
 
 struct SportState {
+  double received_at_s = 0;
   std::array<float, 3> position{0.0F, 0.0F, 0.0F};
   std::array<float, 3> velocity{0.0F, 0.0F, 0.0F};
 };
@@ -157,12 +162,15 @@ class G1LocoController {
   int32_t acquire_user_control(
       const std::vector<double>& initial_pd_target);
   int32_t release_to_walkrun();
+  robojudo::normal_mode::Result switch_walkrun_to_normal();
+  robojudo::normal_mode::Result get_last_normal_mode_switch() const;
   int32_t release_to_passive();
 
   uint64_t step(const std::vector<double>& pd_target);
   void set_gains(const std::vector<double>& stiffness,
                  const std::vector<double>& damping);
   int32_t close();
+  int32_t close_preserving_internal_mode();
 
  private:
   using LowCmd = unitree_hg::msg::dds_::LowCmd_;
@@ -204,6 +212,7 @@ class G1LocoController {
   std::atomic<bool> publish_enabled_{false};
   std::atomic<uint64_t> active_publish_count_{0};
   std::atomic<bool> owns_user_control_{false};
+  robojudo::normal_mode::Result last_normal_mode_switch_;
   std::atomic<bool> initialized_{false};
   std::atomic<bool> closed_{false};
 

@@ -67,6 +67,15 @@ class G1LocoEnv(Environment):
             self._RobotState,
             self._SportState,
         ) = _load_g1_loco_bridge(self.num_dofs, cfg_env.bridge_variant)
+        if cfg_unitree.enable_normal_mode_switch:
+            if not cfg_unitree.enable_odometry:
+                raise ValueError("The normal-mode switch requires Unitree odometry")
+            required = ("switch_walkrun_to_normal", "close_preserving_internal_mode")
+            if not all(hasattr(self._G1LocoController, name) for name in required):
+                raise RuntimeError(
+                    "Installed G1 Bridge is missing the normal-mode interface; "
+                    "rebuild the selected g1_loco_bridge package before starting"
+                )
         self.robot_state = None
         self.sport_state = None
 
@@ -229,6 +238,18 @@ class G1LocoEnv(Environment):
     def release_to_passive(self) -> int:
         return self._handoff("PASSIVE", self.unitree.release_to_passive)
 
+    def switch_walkrun_to_normal(self) -> dict:
+        if not self.enabled:
+            raise RuntimeError("Cannot switch WALKRUN to NORMAL with act=False")
+        method = getattr(self.unitree, "switch_walkrun_to_normal", None)
+        if not callable(method):
+            raise RuntimeError("G1 Bridge lacks switch_walkrun_to_normal; rebuild the selected Bridge package")
+        before = self.get_control_status()
+        result = method().to_dict()
+        logger.warning("G1 WALKRUN to NORMAL: result=%s before=%s after=%s",
+                       result, before, self.get_control_status())
+        return result
+
     def step(self, pd_target, hand_pose=None):
         if hand_pose is not None:
             raise NotImplementedError("G1LocoEnv does not control dexterous hands")
@@ -245,10 +266,13 @@ class G1LocoEnv(Environment):
             raise RuntimeError("G1LocoEnv active LowCmd was not published")
         return publish_count
 
-    def shutdown(self) -> int:
+    def shutdown(self, *, preserve_internal_mode: bool = False) -> int:
         if not hasattr(self, "unitree"):
             return 0
-        result = int(self.unitree.close())
+        if preserve_internal_mode:
+            result = int(self.unitree.close_preserving_internal_mode())
+        else:
+            result = int(self.unitree.close())
         if result == 0:
             self.enabled = False
         else:

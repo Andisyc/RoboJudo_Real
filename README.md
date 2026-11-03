@@ -405,11 +405,25 @@ or star our repo😁
 
 ## G1 native Mimic v3（2026110310）
 
-v3 使用独立的 `G1NativeLocoMimicV3Pipeline`，旧版 `g1_native_loco_mimic`
-和 `g1_native_loco_mimic_v2` 保留原行为。23DoF 配置已接入 v3，
-新增的 29DoF 入口是 `g1_native_loco_mimic_29dof`。
+v3 使用独立的 `G1NativeLocoMimicV3Pipeline`。原启动名 `g1_native_loco_mimic`
+已接入 v3，保留原来的 29DoF、`g1_dance2`、1000 步、网卡和 FK 设置，
+无需导入外部 `site_profile.py` 或复制 `test29.sh`。旧实现可用
+`g1_native_loco_mimic_legacy` 回退，`g1_native_loco_mimic_v2` 保留原行为。
+23DoF 配置和独立的 `g1_native_loco_mimic_29dof` 入口维持原设置。
 
-在实际运行控制程序的机器上、用现有部署 Python 环境重新编译：
+实验室 29DoF 使用原命令；先在实际控制机器的部署 Python 环境中安装新版 Bridge：
+
+```bash
+python -m pip install --no-deps --no-build-isolation --force-reinstall ./packages/g1_loco_bridge_29dof
+
+# 由现场操作者执行；启动控制程序
+env -u CYCLONEDDS_URI python -u scripts/run_pipeline.py \
+  -c g1_native_loco_mimic
+```
+
+该命令直接运行控制器，不启用 `start.sh` 的轨迹录制。
+
+23DoF 则在实际运行控制程序的机器上、用现有部署 Python 环境重新编译：
 
 ```bash
 python -m pip install --no-deps --no-build-isolation --force-reinstall ./packages/g1_loco_bridge_23dof

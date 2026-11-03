@@ -116,7 +116,7 @@ class G1NativeLocoMimicPipelineCfg(PipelineCfg):
 
 
 class G1NativeLocoMimicV3PipelineCfg(G1NativeLocoMimicPipelineCfg):
-    """Versioned v3 controller; legacy 29DoF entrypoints keep their behavior."""
+    """Versioned v3 controller; explicit legacy and v2 routes stay separate."""
 
     pipeline_type: str = "G1NativeLocoMimicV3Pipeline"
     return_to_regular_loco: bool = True

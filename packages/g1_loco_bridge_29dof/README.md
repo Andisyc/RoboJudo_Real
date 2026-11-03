@@ -5,7 +5,9 @@ Same controller source as `g1_loco_bridge_23dof` (byte-identical
 differs). With `num_dofs == 29` the joints map 1:1 onto the G1 motor array, so
 waist roll/pitch and the wrist pitch/yaw motors are commanded by the policy.
 
-Used by the `g1_native_loco_mimic_29dof` configuration (`bridge_variant="v3"`).
+Used by `g1_native_loco_mimic` and `g1_native_loco_mimic_29dof`
+(`bridge_variant="v3"`). The existing `-c g1_native_loco_mimic` launch command
+now selects this package; `g1_native_loco_mimic_legacy` retains the old bridge.
 Build on the machine that runs the controller:
 
 ```bash

@@ -17,7 +17,7 @@ from .policy.g1_beyondmimic_policy_cfg import (
 
 
 @cfg_registry.register
-class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
+class g1_native_loco_mimic_legacy(G1NativeLocoMimicPipelineCfg):
     """Unitree native WALKRUN with explicit handoff to RoboJuDo dances."""
 
     env: G1LocoEnvCfg = G1LocoEnvCfg(
@@ -56,7 +56,7 @@ class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
 
 
 @cfg_registry.register
-class g1_native_loco_mimic_v2(g1_native_loco_mimic):
+class g1_native_loco_mimic_v2(g1_native_loco_mimic_legacy):
     """29DoF native loco handoff using the FSM 801/802-compatible Bridge."""
 
     normal_on_motion_done: bool = False
@@ -174,3 +174,15 @@ class g1_native_loco_mimic_29dof(G1NativeLocoMimicV3PipelineCfg):
                     "to the 29DoF model's frame count"
                 )
         return self
+
+
+@cfg_registry.register
+class g1_native_loco_mimic(g1_native_loco_mimic_29dof):
+    """Keep the existing launch name and robot settings on the v3 controller."""
+
+    # Retain the original entry's FK/torso settings, rather than the separate
+    # 29DoF config's disabled FK or an external site_profile override.
+    env: G1LocoEnvCfg = G1LocoEnvCfg(
+        bridge_variant="v3",
+        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0", regular_fsm_id=501),
+    )

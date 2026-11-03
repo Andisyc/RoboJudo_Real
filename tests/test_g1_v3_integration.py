@@ -59,7 +59,7 @@ class TestV3Integration(unittest.TestCase):
         self.assertTrue(Path(cfg.mimic_policies[0].policy_file).is_file())
 
     def test_legacy_29dof_routes_keep_original_pipeline(self):
-        for name, variant, normal in [("g1_native_loco_mimic", "legacy", True),
+        for name, variant, normal in [("g1_native_loco_mimic_legacy", "legacy", True),
                                       ("g1_native_loco_mimic_v2", "v2", False)]:
             with self.subTest(name=name):
                 cfg = self.config(name)
@@ -68,6 +68,29 @@ class TestV3Integration(unittest.TestCase):
                 self.assertEqual(cfg.normal_on_motion_done, normal)
                 self.assertEqual(cfg.mimic_policies[0].policy_name, "g1_dance2")
                 self.assertTrue(getattr(pipeline_registry.get(cfg.pipeline_type), "exit_on_frame_drop", True))
+
+    def test_existing_launch_name_enables_v3_and_preserves_robot_settings(self):
+        cfg = self.config("g1_native_loco_mimic")
+        old = self.config("g1_native_loco_mimic_legacy")
+        self.assertEqual(cfg.pipeline_type, "G1NativeLocoMimicV3Pipeline")
+        self.assertIs(pipeline_registry.get(cfg.pipeline_type),
+                      pipeline_registry.get("G1NativeLocoMimicV3Pipeline"))
+        self.assertEqual(cfg.env.bridge_variant, "v3")
+        self.assertEqual(len(cfg.env.dof.joint_names), 29)
+        self.assertEqual(cfg.env.unitree.regular_fsm_id, 501)
+        self.assertTrue(cfg.walkrun_on_start)
+        self.assertTrue(cfg.return_to_regular_loco)
+        self.assertFalse(cfg.normal_on_motion_done)
+        self.assertFalse(cfg.env.unitree.enable_normal_mode_switch)
+        self.assertFalse(pipeline_registry.get(cfg.pipeline_type).exit_on_frame_drop)
+        self.assertEqual(cfg.ctrl, old.ctrl)
+        self.assertEqual(cfg.mimic_policies, old.mimic_policies)
+        self.assertEqual(cfg.env.dof, old.env.dof)
+        self.assertEqual(cfg.env.unitree.net_if, old.env.unitree.net_if)
+        self.assertEqual(cfg.env.forward_kinematic, old.env.forward_kinematic)
+        self.assertEqual(cfg.env.torso_name, old.env.torso_name)
+        self.assertTrue(cfg.env.update_with_fk)
+        self.assertTrue(Path(cfg.env.forward_kinematic.xml_path).is_file())
 
     def test_v3_rejects_legacy_bridge_route(self):
         cfg = self.config("g1_native_loco_mimic_23dof_backpack")

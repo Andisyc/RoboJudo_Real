@@ -34,14 +34,17 @@ class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
     ]
     mimic_policies: list[G1BeyondMimicPolicyCfg] = [
         G1BeyondMimicPolicyCfg(
-            policy_name="Dance_wose", without_state_estimator=True
+            policy_name="g1_dance2", without_state_estimator=True
         ),
-        G1BeyondMimicPolicyCfg(
-            policy_name="Violin", without_state_estimator=False, max_timestep=500
-        ),
-        G1BeyondMimicPolicyCfg(
-            policy_name="Waltz", without_state_estimator=False, max_timestep=850
-        ),
+        # G1BeyondMimicPolicyCfg(
+        #     policy_name="Dance_wose", without_state_estimator=True
+        # ),
+        # G1BeyondMimicPolicyCfg(
+        #     policy_name="Violin", without_state_estimator=False, max_timestep=500
+        # ),
+        # G1BeyondMimicPolicyCfg(
+        #     policy_name="Waltz", without_state_estimator=False, max_timestep=850
+        # ),
     ]
     do_safety_check: bool = True
 

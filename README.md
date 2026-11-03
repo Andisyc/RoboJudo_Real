@@ -402,3 +402,51 @@ or star our repo😁
 - [PHC](https://github.com/ZhengyiLuo/PHC): used for implementing the `MotionCtrl` module for OmniH2O.
 - [UnitreeCpp](https://github.com/HansZ8/unitree_cpp): our pybind of `unitree_sdk2` used in `UnitreeCppEnv`.
 - [ZED Proxy](https://github.com/HansZ8/ZED-Proxy/): ZED Camera Odometry Service.
+
+## G1 native Mimic v3（2026110310）
+
+v3 使用独立的 `G1NativeLocoMimicV3Pipeline`，旧版 `g1_native_loco_mimic`
+和 `g1_native_loco_mimic_v2` 保留原行为。23DoF 配置已接入 v3，
+新增的 29DoF 入口是 `g1_native_loco_mimic_29dof`。
+
+在实际运行控制程序的机器上、用现有部署 Python 环境重新编译：
+
+```bash
+python -m pip install --no-deps --no-build-isolation --force-reinstall ./packages/g1_loco_bridge_23dof
+```
+
+29DoF v3 改为构建 `./packages/g1_loco_bridge_29dof`；两个包要求的
+`MIMIC_SAFETY_REVISION` 都是 `2026110310`。需要带 G1 AudioClient 头文件的
+Unitree SDK2、CycloneDDS 和 C++17；记录功能另需 `unitree_sdk2py`。
+
+```bash
+# 只读配置和模型路径，不加载硬件 SDK、不启动机器人
+./run_g1.sh --check-only
+
+# 由现场操作者启动控制和同步记录
+./run_g1.sh
+```
+
+启动器使用当前仓库目录和已激活环境的 `python`，可通过 `ROBOJUDO_PYTHON`
+指定解释器，通过 `ROBOJUDO_CONFIG` 选择配置。默认是
+`g1_native_loco_mimic_23dof_backpack`；记录网卡 `UNITREE_NET_IF` 必须与配置
+中的 `env.unitree.net_if` 一致。`start.sh` 支持透传 `-c`，不带参数时仍沿用
+`run_pipeline.py` 的原默认配置。
+
+本地模型选择保留：背包配置使用 `eight_cut_1_backpack.onnx`、`max_timestep=11252`；
+新增 29DoF 配置使用已有 `g1_dance2.onnx`、`max_timestep=1000`。模型和动作长度在
+`robojudo/config/g1/g1_native_loco_mimic_cfg.py` 修改；合入时没有覆盖模型文件。
+
+v3 默认在交还走跑后静止满 1 秒请求常规运控 **501**；在 500/501 下按 Start
+会自动请求走跑，再停稳后接管。切换每次等待 2 秒、最多 3 次，FSM 变化写入
+`REGULAR_FSM_TRACE` / `WALKRUN_FSM_TRACE`。可分别用 `return_to_regular_loco=False`
+和 `walkrun_on_start=False` 关闭这两个自动行为。
+
+舞蹈中 A/Select 会等待站姿再交还，**不是急停**。交还失败后保持并等待人工接管。
+交还请求仍先停发 LowCmd 再调用 RPC，等待期间的无命令窗口沿用回传实现。
+回传记录的 501 切换依据来自 29DoF，23DoF 真机效果需要现场确认。
+
+离线检查入口：`tests/test_mimic_safety_offline.py`、
+`tests/run_mimic_native_offline.py`、`tests/test_g1_v3_integration.py`。
+`scripts/replay_stop_stance_offline.py` 使用实际 ONNX 和 PolicyWrapper 检查关节映射与冻结；
+`scripts/check_mimic_model.py` 可离线扫描模型参考轨迹。

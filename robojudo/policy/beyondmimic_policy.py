@@ -343,6 +343,25 @@ class BeyondMimicPolicy(Policy):
             
         return scaled_actions
 
+    def reference_frame(self, timestep: int):
+        """Reference (joint_pos, joint_vel, pelvis z) at a timestep, without touching policy state."""
+        if not self.use_motion_from_model:
+            return None
+        obs = np.zeros((1, self.session.get_inputs()[0].shape[1]), dtype=np.float32)
+        joint_pos, joint_vel, body_pos_w = self.session.run(
+            ["joint_pos", "joint_vel", "body_pos_w"],
+            {"obs": obs, "time_step": np.array([[int(timestep)]], dtype=np.float32)},
+        )
+        return (np.asarray(joint_pos).squeeze(), np.asarray(joint_vel).squeeze(),
+                float(np.asarray(body_pos_w).squeeze()[0, 2]))
+
+    def current_reference(self):
+        """Reference produced by the last inference (joint_pos, joint_vel, pelvis z)."""
+        if not self.use_motion_from_model or self.command is None:
+            return None
+        return (np.asarray(self.command["joint_pos"]), np.asarray(self.command["joint_vel"]),
+                float(np.asarray(self.command["body_pos_w"])[0, 2]))
+
     def get_init_dof_pos(self) -> np.ndarray:
         """
         Return first frame of the reference motion.

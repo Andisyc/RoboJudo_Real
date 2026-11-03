@@ -84,7 +84,7 @@ def main():
                     control_time_diff = pipeline.dt - (elapsed - handoff_wait)
                     if control_time_diff < 0:
                         logger.error(f"Warning: frame drop -> {control_time_diff}")
-                    if control_time_diff < -0.2:
+                    if control_time_diff < -0.2 and getattr(pipeline, "exit_on_frame_drop", True):
                         logger.critical("Exiting due to excessive frame drop")
                         pipeline.env.shutdown()
                         time.sleep(10)

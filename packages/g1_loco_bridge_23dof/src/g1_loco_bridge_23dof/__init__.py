@@ -17,3 +17,5 @@ __all__ = [
     "RobotState",
     "SportState",
 ]
+
+from ._g1_loco_bridge_23dof import MIMIC_SAFETY_REVISION

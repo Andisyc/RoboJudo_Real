@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from pydantic import model_validator
+
 from robojudo.config import cfg_registry
 from robojudo.controller.ctrl_cfgs import UnitreeCtrlCfg
-from robojudo.pipeline.pipeline_cfgs import G1NativeLocoMimicPipelineCfg
+from robojudo.pipeline.pipeline_cfgs import (
+    G1NativeLocoMimicPipelineCfg, G1NativeLocoMimicV3PipelineCfg,
+)
 
-from .env.g1_env_cfg import G1_23DoF
+from .env.g1_env_cfg import G1_23DoF, G1_29DoF
 from .env.g1_loco_env_cfg import G1LocoEnvCfg, G1LocoUnitreeCfg
 from .policy.g1_beyondmimic_policy_cfg import (
     G1BeyondMimic23DoFPolicyCfg,
@@ -63,11 +67,12 @@ class g1_native_loco_mimic_v2(g1_native_loco_mimic):
 
 
 @cfg_registry.register
-class g1_native_loco_mimic_23dof(G1NativeLocoMimicPipelineCfg):
+class g1_native_loco_mimic_23dof(G1NativeLocoMimicV3PipelineCfg):
     """Unitree native WALKRUN with explicit handoff to RoboJuDo 23DoF dances."""
 
     env: G1LocoEnvCfg = G1LocoEnvCfg(
-        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0"),
+        bridge_variant="v3",
+        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0", regular_fsm_id=501),
         dof=G1_23DoF(),
         forward_kinematic=None,
         update_with_fk=False,
@@ -93,11 +98,12 @@ class g1_native_loco_mimic_23dof(G1NativeLocoMimicPipelineCfg):
 
 
 @cfg_registry.register
-class g1_native_loco_mimic_23dof_backpack(G1NativeLocoMimicPipelineCfg):
+class g1_native_loco_mimic_23dof_backpack(G1NativeLocoMimicV3PipelineCfg):
     """Unitree native WALKRUN handoff to the backpack-trained 23DoF policy."""
 
     env: G1LocoEnvCfg = G1LocoEnvCfg(
-        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0"),
+        bridge_variant="v3",
+        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0", regular_fsm_id=501),
         dof=G1_23DoF(),
         forward_kinematic=None,
         update_with_fk=False,
@@ -122,3 +128,49 @@ class g1_native_loco_mimic_23dof_backpack(G1NativeLocoMimicPipelineCfg):
         ),
     ]
     do_safety_check: bool = True
+
+
+@cfg_registry.register
+class g1_native_loco_mimic_29dof(G1NativeLocoMimicV3PipelineCfg):
+    """Same v3 handoff controller on a 29DoF G1 (bridge g1_loco_bridge_29dof)."""
+
+    env: G1LocoEnvCfg = G1LocoEnvCfg(
+        bridge_variant="v3",
+        unitree=G1LocoUnitreeCfg(net_if="enP8p1s0", regular_fsm_id=501),
+        dof=G1_29DoF(),
+        forward_kinematic=None,
+        update_with_fk=False,
+    )
+    ctrl: list[UnitreeCtrlCfg] = [
+        UnitreeCtrlCfg(
+            combination_init_buttons=[],
+            triggers={
+                "A": "[SHUTDOWN]",
+                "Select": "[POLICY_LOCO]",
+                "Start": "[POLICY_MIMIC]",
+                "R1": "[POLICY_SWITCH],NEXT",
+                "L1": "[POLICY_SWITCH],LAST",
+            },
+        )
+    ]
+    # Keep the local 29DoF test model; select a different motion here when needed.
+    mimic_policies: list[G1BeyondMimicPolicyCfg] = [
+        G1BeyondMimicPolicyCfg(
+            policy_name="g1_dance2",
+            without_state_estimator=False,
+            max_timestep=1000,
+        ),
+    ]
+    do_safety_check: bool = True
+
+    @model_validator(mode="after")
+    def require_motion_length(self):
+        # Without max_timestep the dance never reports MOTION_DONE and is
+        # never handed back to WALKRUN.
+        for policy in self.mimic_policies:
+            if policy.max_timestep <= 0:
+                raise ValueError(
+                    f"g1_native_loco_mimic_29dof: set max_timestep for '{policy.policy_name}' "
+                    "to the 29DoF model's frame count"
+                )
+        return self

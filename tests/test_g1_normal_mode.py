@@ -229,6 +229,20 @@ class TestNormalMode(unittest.TestCase):
         self.assertIn("passive", self.calls)
         self.entry_logger.critical.assert_called_once()
 
+    def test_runner_respects_pipeline_frame_drop_opt_out(self):
+        def slow_policy(*_args):
+            self.clock.value += 0.3
+            return {}, [0.0] * 29
+
+        self.pipe.exit_on_frame_drop = False
+        self.pipe._step_mimic = slow_policy
+        self.run_entrypoint()
+        # Only the ordinary close may release; the frame watchdog must not
+        # call env.shutdown() while this pipeline keeps its command stream.
+        self.assertEqual(self.calls, ["passive"])
+        self.entry_logger.critical.assert_not_called()
+        self.time.sleep.assert_not_called()
+
 
 class TestEnvWrapper(unittest.TestCase):
     @classmethod

@@ -113,3 +113,19 @@ class G1NativeLocoMimicPipelineCfg(PipelineCfg):
             if not self.env.unitree.enable_normal_mode_switch or not self.env.unitree.enable_odometry:
                 raise ValueError("normal_on_motion_done requires the normal-mode switch and Unitree odometry")
         return self
+
+
+class G1NativeLocoMimicV3PipelineCfg(G1NativeLocoMimicPipelineCfg):
+    """Versioned v3 controller; legacy 29DoF entrypoints keep their behavior."""
+
+    pipeline_type: str = "G1NativeLocoMimicV3Pipeline"
+    return_to_regular_loco: bool = True
+    walkrun_on_start: bool = True
+
+    @model_validator(mode="after")
+    def check_v3_bridge(self):
+        if self.env.bridge_variant != "v3":
+            raise ValueError("The v3 pipeline requires bridge_variant='v3'")
+        if self.normal_on_motion_done:
+            raise ValueError("Use return_to_regular_loco for the v3 pipeline")
+        return self

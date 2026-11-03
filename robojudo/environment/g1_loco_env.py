@@ -21,15 +21,31 @@ def _load_g1_loco_bridge(num_dofs: int, bridge_variant: str = "legacy"):
             RobotState,
             SportState,
         )
-    elif bridge_variant != "legacy":
+    elif bridge_variant == "v3" and num_dofs == 29:
+        # Same controller source as the 23DoF bridge, built as its own module.
+        from g1_loco_bridge_29dof import MIMIC_SAFETY_REVISION
+        if MIMIC_SAFETY_REVISION != 2026110310:
+            raise RuntimeError("Rebuild g1_loco_bridge_29dof: MIMIC_SAFETY_REVISION mismatch")
+        from g1_loco_bridge_29dof import (  # type: ignore
+            AuthorityState,
+            G1LocoController,
+            RobotState,
+            SportState,
+        )
+    elif bridge_variant not in ("legacy", "v3"):
         raise ValueError(f"Unknown G1 Bridge variant: {bridge_variant}")
     elif num_dofs == 23:
+        from g1_loco_bridge_23dof import MIMIC_SAFETY_REVISION
+        if MIMIC_SAFETY_REVISION != 2026110310:
+            raise RuntimeError("Rebuild g1_loco_bridge_23dof: MIMIC_SAFETY_REVISION mismatch")
         from g1_loco_bridge_23dof import (  # type: ignore
             AuthorityState,
             G1LocoController,
             RobotState,
             SportState,
         )
+    elif bridge_variant == "v3":
+        raise ValueError("bridge_variant 'v3' requires a 23DoF or 29DoF environment")
     else:
         from g1_loco_bridge import (  # type: ignore
             AuthorityState,
@@ -112,8 +128,10 @@ class G1LocoEnv(Environment):
         if not self.born_place_align:
             return
         self.born_place_align = False
-        self.update()
-        self.born_place_align = True
+        try:
+            self.update()
+        finally:
+            self.born_place_align = True
         self.set_born_place()
         self.update()
 
@@ -128,6 +146,7 @@ class G1LocoEnv(Environment):
 
     def update(self):
         self.robot_state = self.unitree.get_robot_state()
+        self._state_read_time = time.monotonic()
         motor_state = self.robot_state.motor_state
         if self._dof_idx is None:
             self._dof_pos = np.asarray(motor_state.q, dtype=np.float32)
@@ -142,6 +161,7 @@ class G1LocoEnv(Environment):
 
         imu_state = self.robot_state.imu_state
         base_quat = np.asarray(imu_state.quaternion, dtype=np.float32)[[1, 2, 3, 0]]
+        raw_base_quat = base_quat.copy()
         if self.born_place_align:
             base_quat = self.base_align.align_quat(base_quat)
         self._base_quat = base_quat
@@ -160,7 +180,7 @@ class G1LocoEnv(Environment):
             self.sport_state = self.unitree.get_sport_state()
             base_pos = np.asarray(self.sport_state.position, dtype=np.float32)
             lin_vel = np.asarray(self.sport_state.velocity, dtype=np.float32)
-            self._base_lin_vel = quat_rotate_inverse_np(self.base_quat, lin_vel)
+            self._base_lin_vel = quat_rotate_inverse_np(raw_base_quat, lin_vel)
             self._base_pos = (
                 self.base_align.align_pos(base_pos) if self.born_place_align else base_pos
             )
@@ -178,6 +198,12 @@ class G1LocoEnv(Environment):
 
         if self.RemoteControllerHandler is not None:
             self.RemoteControllerHandler(self.robot_state.wireless_remote)
+
+    def safety_state_age(self):
+        return float(self.robot_state.state_age_s) + time.monotonic() - self._state_read_time
+
+    def speak_safety_warning(self, text):
+        return self.unitree.speak_safety_warning(text)
 
     def get_data(self):
         env_data = super().get_data()
@@ -249,6 +275,31 @@ class G1LocoEnv(Environment):
         logger.warning("G1 WALKRUN to NORMAL: result=%s before=%s after=%s",
                        result, before, self.get_control_status())
         return result
+
+    def _fsm_trace(self):
+        # (seconds since the switch began, request attempt, FSM id or -|query error|,
+        # FSM mode or -1), one entry per change; attempt 0 is before the first request.
+        return [
+            (round(float(t), 3), int(attempt), int(fsm), int(mode))
+            for t, attempt, fsm, mode in self.unitree.get_last_fsm_trace()
+        ]
+
+    def switch_walkrun_to_regular(self) -> int:
+        result = self._handoff("REGULAR", self.unitree.switch_walkrun_to_regular)
+        self.last_regular_fsm_trace = self._fsm_trace()
+        logger.warning("REGULAR_FSM_TRACE: result=%s trace=%s", result, self.last_regular_fsm_trace)
+        return result
+
+    def switch_regular_to_walkrun(self) -> int:
+        result = self._handoff("WALKRUN_FROM_REGULAR", self.unitree.switch_regular_to_walkrun)
+        self.last_walkrun_fsm_trace = self._fsm_trace()
+        logger.warning("WALKRUN_FSM_TRACE: result=%s trace=%s", result, self.last_walkrun_fsm_trace)
+        return result
+
+    def sync_operator_fsm(self) -> int:
+        """Query the FSM without requesting any mode; drops the hold stream if
+        the operator already moved the firmware out of user control."""
+        return int(self.unitree.sync_operator_fsm())
 
     def step(self, pd_target, hand_pose=None):
         if hand_pose is not None:

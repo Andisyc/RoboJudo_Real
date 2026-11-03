@@ -29,3 +29,5 @@ pipeline_registry.add("RlPipeline", ".rl_pipeline")
 pipeline_registry.add("RlMultiPolicyPipeline", ".rl_multi_policy_pipeline")
 pipeline_registry.add("RlLocoMimicPipeline", ".rl_loco_mimic_pipeline")
 pipeline_registry.add("G1NativeLocoMimicPipeline", ".g1_native_loco_mimic_pipeline")
+
+pipeline_registry.add("G1NativeLocoMimicV3Pipeline", ".g1_native_loco_mimic_v3_pipeline")

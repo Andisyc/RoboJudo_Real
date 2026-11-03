@@ -3,6 +3,7 @@
 # 设置为 True 时随主程序自动记录轨迹；设置为 False 时只启动主程序。
 RECORD_TRAJECTORY=True
 UNITREE_NET_IF="${UNITREE_NET_IF:-eth0}"
+ROBOJUDO_PYTHON="${ROBOJUDO_PYTHON:-python}"
 
 # 神奇的xml文件用于解决连不上G1 low-state问题
 export CYCLONEDDS_URI="file://$(pwd)/cyclonedds.xml"
@@ -52,7 +53,7 @@ start_trajectory_recorder() {
 
     # The deployed unitree_sdk2py participant works with its automatic DDS
     # configuration; keep RoboJuDo's CYCLONEDDS_URI only for the controller.
-    env -u CYCLONEDDS_URI python scripts/record_g1_trajectory.py \
+    env -u CYCLONEDDS_URI "${ROBOJUDO_PYTHON}" -u scripts/record_g1_trajectory.py \
         --net-if "${UNITREE_NET_IF}" \
         --output "${ROBOJUDO_RECORD_DIR}/state.msgpack" \
         --run-id "${ROBOJUDO_RUN_ID}" \
@@ -63,7 +64,7 @@ start_trajectory_recorder() {
 
 wait_for_trajectory_recorder() {
     local attempt
-    for attempt in {1..100}; do
+    for attempt in {1..1500}; do
         if [[ -e "${trajectory_ready_file}" ]]; then
             echo "Trajectory recorder ready and recording (pid=${recorder_pid})."
             return 0
@@ -121,8 +122,8 @@ handle_signal() {
 }
 
 run_controller() {
-    # 启动命令，请自己修改run_pipeline.py内的参数
-    python scripts/run_pipeline.py
+    # No arguments retain the existing run_pipeline.py default.
+    "${ROBOJUDO_PYTHON}" -u scripts/run_pipeline.py "$@"
 }
 
 trap on_exit EXIT
@@ -132,6 +133,6 @@ trap 'handle_signal 143' TERM
 if ! start_trajectory_recorder; then
     exit 1
 fi
-run_controller
+run_controller "$@"
 controller_status=$?
 exit "${controller_status}"

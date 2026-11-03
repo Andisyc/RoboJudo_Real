@@ -1,6 +1,9 @@
 #include "g1_loco_controller.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <unitree/robot/g1/audio/g1_audio_client.hpp>
 #include <chrono>
 #include <cstring>
 #include <functional>
@@ -10,6 +13,10 @@
 
 namespace robojudo::g1_loco {
 namespace {
+
+double SteadySeconds() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 uint32_t Crc32Core(uint32_t* ptr, uint32_t len) {
   uint32_t crc = 0xFFFFFFFF;
@@ -40,19 +47,27 @@ G1LocoController::G1LocoController(const G1LocoConfig& config)
       stiffness_(config.stiffness),
       damping_(config.damping),
       num_dofs_(config.num_dofs) {
-  if (num_dofs_ != kG123DofMotorIndices.size()) {
+  if (num_dofs_ != kG123DofMotorIndices.size() && num_dofs_ != kG1FullDofCount) {
     throw std::invalid_argument(
-        "g1_loco_bridge_23dof requires num_dofs == 23");
+        "G1 loco bridge requires num_dofs == 23 or 29");
   }
   if (stiffness_.size() != num_dofs_ || damping_.size() != num_dofs_) {
     throw std::invalid_argument(
         "stiffness and damping must match num_dofs");
   }
   if (config_.control_dt <= 0.0 || config_.fsm_confirm_timeout <= 0.0 ||
-      config_.sdk_timeout <= 0.0) {
-    throw std::invalid_argument("controller timeouts and control_dt must be positive");
+      config_.regular_confirm_timeout <= 0.0 || config_.sdk_timeout <= 0.0 ||
+      config_.regular_attempts < 1 || config_.walkrun_confirm_timeout <= 0.0 ||
+      config_.walkrun_attempts < 1) {
+    throw std::invalid_argument(
+        "controller timeouts, control_dt and switch attempts must be positive");
+  }
+  if (!IsRegularLocoFsm(config_.regular_fsm_id)) {
+    throw std::invalid_argument("regular_fsm_id must be 500 or 501");
   }
 
+  if (!mimic_safety::ValidGains(stiffness_, damping_))
+    throw std::invalid_argument("invalid safety gains");
   unitree::robot::ChannelFactory::Instance()->Init(0, config_.net_if);
 
   loco_client_ = std::make_shared<unitree::robot::g1::LocoClient>();
@@ -141,7 +156,9 @@ RobotState G1LocoController::get_robot_state() const {
   if (!state) {
     throw std::runtime_error("LowState data is not available");
   }
-  return *state;
+  RobotState result = *state;
+  result.state_age_s = SteadySeconds() - std::min(result.received_time, result.tick_time);
+  return result;
 }
 
 SportState G1LocoController::get_sport_state() const {
@@ -184,8 +201,12 @@ void G1LocoController::LowStateHandler(const void* message) {
 
   RobotState state(num_dofs_);
   state.tick = low_state.tick();
+  state.received_time = SteadySeconds();
+  const auto previous_state = robot_state_buffer_.GetData();
+  state.tick_time = previous_state && previous_state->tick == state.tick
+      ? previous_state->tick_time : state.received_time;
   for (std::size_t i = 0; i < num_dofs_; ++i) {
-    const std::size_t motor_idx = kG123DofMotorIndices.at(i);
+    const std::size_t motor_idx = MotorIndex(i);
     state.motor_state.q.at(i) = low_state.motor_state().at(motor_idx).q();
     state.motor_state.dq.at(i) = low_state.motor_state().at(motor_idx).dq();
     state.motor_state.tau_est.at(i) =
@@ -259,8 +280,8 @@ void G1LocoController::PublishLowCommandLocked(
   LowCmd dds_command;
   dds_command.mode_pr() = 0;
   dds_command.mode_machine() = mode_machine_.load();
-  // Default: all 29 motors disabled (mode=0, zero gains) so unused joints
-  // in the 23DoF subset never receive torque commands.
+  // Default: all 29 motors disabled (mode=0, zero gains) so motors absent
+  // from a 23DoF robot never receive torque commands.
   for (std::size_t i = 0; i < kG1FullDofCount; ++i) {
     auto& motor = dds_command.motor_cmd().at(i);
     motor.mode() = 0;
@@ -270,9 +291,9 @@ void G1LocoController::PublishLowCommandLocked(
     motor.kd() = 0.0F;
     motor.tau() = 0.0F;
   }
-  // Fill active joints through the 23DoF -> 29DoF motor index map.
+  // Fill active joints through the joint -> motor index map.
   for (std::size_t i = 0; i < num_dofs_; ++i) {
-    auto& motor = dds_command.motor_cmd().at(kG123DofMotorIndices.at(i));
+    auto& motor = dds_command.motor_cmd().at(MotorIndex(i));
     motor.mode() = 1;
     motor.q() = command.q_target.at(i);
     motor.dq() = command.dq_target.at(i);
@@ -318,7 +339,14 @@ void G1LocoController::ClearCommandLocked() {
 
 int32_t G1LocoController::QueryFsmIdLocked(int32_t& fsm_id) {
   int sdk_fsm_id = -1;
-  const int32_t result = loco_client_->GetFsmId(sdk_fsm_id);
+  int32_t result = kBridgeRpcException;
+  try {
+    result = loco_client_->GetFsmId(sdk_fsm_id);
+  } catch (...) {
+    // Callers treat this like any failed query (retry, or keep holding).
+    last_loco_api_result_.store(kBridgeRpcException);
+    return kBridgeFsmQueryFailed;
+  }
   last_loco_api_result_.store(result);
   if (result == 0) {
     fsm_id = static_cast<int32_t>(sdk_fsm_id);
@@ -327,48 +355,36 @@ int32_t G1LocoController::QueryFsmIdLocked(int32_t& fsm_id) {
   return result;
 }
 
-int32_t G1LocoController::WaitForFsmLocked(int32_t expected_fsm_id) {
-  const auto deadline = std::chrono::steady_clock::now() +
+int32_t G1LocoController::QueryFsmModeLocked() {
+  int fsm_mode = -1;
+  try {
+    if (loco_client_->GetFsmMode(fsm_mode) != 0) {
+      return -1;
+    }
+  } catch (...) {
+    return -1;
+  }
+  return static_cast<int32_t>(fsm_mode);
+}
+
+int32_t G1LocoController::WaitForFsmLocked(
+    int32_t expected_fsm_id, double timeout_s) {
+  const auto started = std::chrono::steady_clock::now();
+  const auto deadline = started +
                         std::chrono::duration<double>(
-                            config_.fsm_confirm_timeout);
+                            timeout_s > 0.0 ? timeout_s : config_.fsm_confirm_timeout);
+  // A single failed query is retried until the deadline instead of ending
+  // the handoff while the FSM may already have changed.
+  int32_t query_result = 0;
   do {
     int32_t fsm_id = -1;
-    if (QueryFsmIdLocked(fsm_id) != 0) {
-      return kBridgeFsmQueryFailed;
-    }
-    if (fsm_id == expected_fsm_id) {
+    query_result = QueryFsmIdLocked(fsm_id);
+    if (query_result == 0 && FsmMatches(fsm_id, expected_fsm_id)) {
       return 0;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
   } while (std::chrono::steady_clock::now() < deadline);
-  return kBridgeFsmTimeout;
-}
-
-int32_t G1LocoController::EnsurePassiveInternalLocked() {
-  int32_t fsm_id = -1;
-  if (QueryFsmIdLocked(fsm_id) != 0) {
-    authority_state_.store(AuthorityState::FAULT);
-    return kBridgeFsmQueryFailed;
-  }
-  if (fsm_id == kPassiveFsmId) {
-    authority_state_.store(AuthorityState::INTERNAL);
-    return 0;
-  }
-  if (fsm_id == kUserControlFsmId) {
-    authority_state_.store(AuthorityState::FAULT);
-    return kBridgeInvalidState;
-  }
-
-  const int32_t damp_result = loco_client_->Damp();
-  last_loco_api_result_.store(damp_result);
-  if (damp_result != 0) {
-    return damp_result;
-  }
-  const int32_t confirm_result = WaitForFsmLocked(kPassiveFsmId);
-  if (confirm_result == 0) {
-    authority_state_.store(AuthorityState::INTERNAL);
-  }
-  return confirm_result;
+  return query_result != 0 ? kBridgeFsmQueryFailed : kBridgeFsmTimeout;
 }
 
 int32_t G1LocoController::acquire_user_control(
@@ -395,9 +411,13 @@ int32_t G1LocoController::acquire_user_control(
     authority_state_.store(AuthorityState::FAULT);
     return kBridgeFsmQueryFailed;
   }
-  if (fsm_id != kWalkRunFsmId) {
+  if (!IsWalkRunFsm(fsm_id)) {
     return kBridgeUnexpectedFsm;
   }
+
+  const auto violation = CheckEntryTargetLocked(initial_pd_target);
+  if (!violation.empty())
+    throw std::invalid_argument("MIMIC_SAFETY: " + violation);
 
   MotorCommand command(num_dofs_);
   for (std::size_t i = 0; i < num_dofs_; ++i) {
@@ -420,62 +440,49 @@ int32_t G1LocoController::acquire_user_control(
     return kBridgeNoRobotState;
   }
 
-  const int32_t switch_result = loco_client_->SwitchToUserCtrl();
-  last_loco_api_result_.store(switch_result);
-  if (switch_result != 0) {
-    int32_t observed_fsm = -1;
-    if (QueryFsmIdLocked(observed_fsm) == 0 &&
-        observed_fsm != kUserControlFsmId) {
-      DisablePublishingLocked();
-      authority_state_.store(AuthorityState::INTERNAL);
-      ClearCommandLocked();
-    } else if (observed_fsm == kUserControlFsmId) {
-      RestoreUserControlAfterReleaseFailureLocked(
-          motor_command_buffer_.GetData());
-      WriteLowCommandOnce();
-    } else {
-      authority_state_.store(AuthorityState::FAULT);
-    }
-    return switch_result;
+  int32_t confirm_result = kBridgeFsmUnconfirmed;
+  try {
+    const int32_t switch_result = loco_client_->SwitchToUserCtrl();
+    last_loco_api_result_.store(switch_result);
+    // After issuing the request, ownership may be uncertain until confirmed.
+    owns_user_control_.store(true);
+    confirm_result = switch_result == 0
+        ? WaitForFsmLocked(kUserControlFsmId) : switch_result;
+  } catch (...) {
+    owns_user_control_.store(true);
+    static_cast<void>(SettleUnconfirmedAcquireLocked(kBridgeFsmUnconfirmed));
+    throw;
   }
-  // The request was accepted, so cleanup must assume ownership even if the
-  // following FSM confirmation cannot be completed.
-  owns_user_control_.store(true);
+  if (confirm_result != 0) {
+    return SettleUnconfirmedAcquireLocked(confirm_result);
+  }
+  authority_state_.store(AuthorityState::USER_ACTIVE);
+  static_cast<void>(WriteLowCommandOnce());
+  return 0;
+}
 
-  const int32_t confirm_result = WaitForFsmLocked(kUserControlFsmId);
-  if (confirm_result == 0) {
+int32_t G1LocoController::SettleUnconfirmedAcquireLocked(int32_t reason) {
+  // The USER request may already be in effect. Stop streaming only after the
+  // firmware is observed outside FSM 1000; otherwise keep holding the first
+  // target so FSM 1000 is never left without LowCmd. No mode request here.
+  int32_t fsm_id = -1;
+  const int32_t query_result = QueryFsmIdLocked(fsm_id);
+  if (query_result == 0 && fsm_id == kUserControlFsmId) {
     authority_state_.store(AuthorityState::USER_ACTIVE);
-    if (!WriteLowCommandOnce()) {
-      authority_state_.store(AuthorityState::FAULT);
-      return kBridgeInvalidState;
-    }
+    static_cast<void>(WriteLowCommandOnce());
     return 0;
   }
-
-  const auto hold_command = motor_command_buffer_.GetData();
-  const int32_t fallback_result = loco_client_->SwitchToInternalCtrl(
-      unitree::robot::g1::InternalFsmMode::PASSIVE);
-  last_loco_api_result_.store(fallback_result);
-  if (fallback_result == 0 &&
-      WaitForFsmLocked(kPassiveFsmId) == 0) {
+  if (query_result == 0) {
     DisablePublishingLocked();
+    ClearCommandLocked();
     owns_user_control_.store(false);
     authority_state_.store(AuthorityState::INTERNAL);
-    ClearCommandLocked();
-  } else {
-    int32_t observed_fsm = -1;
-    if (QueryFsmIdLocked(observed_fsm) == 0 &&
-        observed_fsm != kUserControlFsmId) {
-      DisablePublishingLocked();
-      owns_user_control_.store(false);
-      authority_state_.store(AuthorityState::INTERNAL);
-      ClearCommandLocked();
-    } else {
-      RestoreUserControlAfterReleaseFailureLocked(hold_command);
-      WriteLowCommandOnce();
-    }
+    return reason != 0 ? reason : kBridgeUnexpectedFsm;
   }
-  return confirm_result;
+  owns_user_control_.store(true);
+  authority_state_.store(AuthorityState::USER_ACTIVE);
+  static_cast<void>(WriteLowCommandOnce());
+  return kBridgeFsmUnconfirmed;
 }
 
 void G1LocoController::RestoreUserControlAfterReleaseFailureLocked(
@@ -507,7 +514,7 @@ int32_t G1LocoController::ReleaseToInternalLocked(
       authority_state_.store(AuthorityState::FAULT);
       return kBridgeFsmQueryFailed;
     }
-    return fsm_id == expected_fsm_id ? 0 : kBridgeUnexpectedFsm;
+    return FsmMatches(fsm_id, expected_fsm_id) ? 0 : kBridgeUnexpectedFsm;
   }
   if (!owns_user_control_.load()) {
     return kBridgeInvalidState;
@@ -517,12 +524,32 @@ int32_t G1LocoController::ReleaseToInternalLocked(
     return kBridgeInvalidState;
   }
 
+  // If the firmware already left FSM 1000 (e.g. operator action), request
+  // nothing: never send WALKRUN to a robot that is in another internal mode.
+  int32_t current_fsm = -1;
+  if (QueryFsmIdLocked(current_fsm) == 0 &&
+      current_fsm != kUserControlFsmId) {
+    DisablePublishingLocked();
+    ClearCommandLocked();
+    owns_user_control_.store(false);
+    authority_state_.store(AuthorityState::INTERNAL);
+    return FsmMatches(current_fsm, expected_fsm_id) ? 0 : kBridgeUnexpectedFsm;
+  }
+
   const auto last_command = motor_command_buffer_.GetData();
   authority_state_.store(AuthorityState::RELEASING);
   DisablePublishingLocked();
   ClearCommandLocked();
 
-  const int32_t switch_result = loco_client_->SwitchToInternalCtrl(mode);
+  // Publishing is already stopped here: an exception must not leave the
+  // bridge in RELEASING without a hold stream while FSM 1000 may be active.
+  // It is handled like an error code below (read the FSM back, restore hold).
+  int32_t switch_result = kBridgeRpcException;
+  try {
+    switch_result = loco_client_->SwitchToInternalCtrl(mode);
+  } catch (...) {
+    switch_result = kBridgeRpcException;
+  }
   last_loco_api_result_.store(switch_result);
   int32_t release_result = switch_result;
   if (switch_result == 0) {
@@ -536,7 +563,7 @@ int32_t G1LocoController::ReleaseToInternalLocked(
 
   int32_t fsm_id = -1;
   const int32_t query_result = QueryFsmIdLocked(fsm_id);
-  if (query_result == 0 && fsm_id == expected_fsm_id) {
+  if (query_result == 0 && FsmMatches(fsm_id, expected_fsm_id)) {
     owns_user_control_.store(false);
     authority_state_.store(AuthorityState::INTERNAL);
     return 0;
@@ -569,6 +596,157 @@ int32_t G1LocoController::release_to_passive() {
   return ReleaseToInternalLocked(
       unitree::robot::g1::InternalFsmMode::PASSIVE,
       kPassiveFsmId);
+}
+
+int32_t G1LocoController::switch_walkrun_to_regular() {
+  std::lock_guard<std::mutex> lock(authority_mutex_);
+  if (closed_.load()) {
+    return kBridgeClosed;
+  }
+  if (authority_state_.load() != AuthorityState::INTERNAL ||
+      owns_user_control_.load()) {
+    return kBridgeInvalidState;
+  }
+  // LocoClient::Start() is SetFsmId(500); some firmware only leaves WALKRUN
+  // for 501. Either may then be reported as 500 or 501.
+  return SwitchInternalFsmLocked(IsWalkRunFsm, IsRegularLocoFsm,
+                                 config_.regular_fsm_id, config_.regular_attempts,
+                                 config_.regular_confirm_timeout);
+}
+
+int32_t G1LocoController::switch_regular_to_walkrun() {
+  std::lock_guard<std::mutex> lock(authority_mutex_);
+  if (closed_.load()) {
+    return kBridgeClosed;
+  }
+  if (authority_state_.load() != AuthorityState::INTERNAL ||
+      owns_user_control_.load()) {
+    return kBridgeInvalidState;
+  }
+  // unitree-001 (29DoF, charged): SetFsmId(801) from 501 -> 801. With a low
+  // battery the same request ended in damp (FSM 1): never re-request then.
+  return SwitchInternalFsmLocked(IsRegularLocoFsm, IsWalkRunFsm, kWalkRunFsmId,
+                                 config_.walkrun_attempts,
+                                 config_.walkrun_confirm_timeout);
+}
+
+int32_t G1LocoController::SwitchInternalFsmLocked(
+    bool (*is_from)(int32_t), bool (*is_to)(int32_t), int32_t request_fsm_id,
+    int attempts, double confirm_timeout_s) {
+  last_fsm_trace_.clear();
+  const auto started = std::chrono::steady_clock::now();
+  const auto record = [&](int32_t attempt, int32_t fsm_value) {
+    const int32_t fsm_mode = QueryFsmModeLocked();
+    if (last_fsm_trace_.empty() ||
+        std::get<1>(last_fsm_trace_.back()) != attempt ||
+        std::get<2>(last_fsm_trace_.back()) != fsm_value ||
+        std::get<3>(last_fsm_trace_.back()) != fsm_mode) {
+      last_fsm_trace_.emplace_back(
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(),
+          attempt, fsm_value, fsm_mode);
+    }
+  };
+  int32_t fsm_id = -1;
+  const int32_t first_query = QueryFsmIdLocked(fsm_id);
+  if (first_query != 0) {
+    record(0, -std::abs(first_query));
+    return kBridgeFsmQueryFailed;
+  }
+  record(0, fsm_id);
+  if (is_to(fsm_id)) {
+    return 0;
+  }
+  // Only from a confirmed source mode; any other internal mode is left untouched.
+  if (!is_from(fsm_id)) {
+    return kBridgeUnexpectedFsm;
+  }
+  int32_t result = kBridgeFsmTimeout;
+  for (int attempt = 1; attempt <= attempts; ++attempt) {
+    int32_t request_result = kBridgeRpcException;
+    try {
+      request_result = loco_client_->SetFsmId(request_fsm_id);
+    } catch (...) {
+      request_result = kBridgeRpcException;
+    }
+    last_loco_api_result_.store(request_result);
+    if (request_result != 0) {
+      result = request_result;
+    }
+    // Even a failed request may have reached the firmware: always read back.
+    bool still_from = false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::duration<double>(confirm_timeout_s);
+    do {
+      const int32_t query_result = QueryFsmIdLocked(fsm_id);
+      if (query_result != 0) {
+        record(attempt, -std::abs(query_result));
+        still_from = false;
+      } else {
+        record(attempt, fsm_id);
+        if (is_to(fsm_id)) {
+          return 0;
+        }
+        // The firmware or the operator chose another mode (e.g. damp):
+        // leave it alone, no further request.
+        if (!is_from(fsm_id)) {
+          return kBridgeUnexpectedFsm;
+        }
+        still_from = true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    } while (std::chrono::steady_clock::now() < deadline);
+    // Re-request only from a FSM just read back as the source mode.
+    if (!still_from) {
+      return kBridgeFsmQueryFailed;
+    }
+  }
+  return result;
+}
+
+std::vector<G1LocoController::FsmTraceEntry> G1LocoController::get_last_fsm_trace() const {
+  std::lock_guard<std::mutex> lock(authority_mutex_);
+  return last_fsm_trace_;
+}
+
+int32_t G1LocoController::sync_operator_fsm() {
+  std::lock_guard<std::mutex> lock(authority_mutex_);
+  if (closed_.load()) {
+    return kBridgeClosed;
+  }
+  int32_t fsm_id = -1;
+  const int32_t query_result = QueryFsmIdLocked(fsm_id);
+  if (query_result != 0) {
+    return query_result < 0 ? query_result : kBridgeFsmQueryFailed;
+  }
+  if (authority_state_.load() == AuthorityState::USER_ACTIVE &&
+      owns_user_control_.load() && fsm_id != kUserControlFsmId) {
+    DisablePublishingLocked();
+    ClearCommandLocked();
+    owns_user_control_.store(false);
+    authority_state_.store(AuthorityState::INTERNAL);
+  }
+  return fsm_id;
+}
+
+std::string G1LocoController::CheckEntryTargetLocked(const std::vector<double>& q) const {
+  const auto sample = robot_state_buffer_.GetData();
+  if (!sample || !mimic_safety::Fresh(SteadySeconds()-std::min(sample->received_time,sample->tick_time)))
+    return "stale entry LowState";
+  std::vector<double> reference(sample->motor_state.q.begin(),sample->motor_state.q.end());
+  return mimic_safety::CheckEntryTarget(q, reference);
+}
+
+int32_t G1LocoController::speak_safety_warning(const std::string& text) {
+  // Uses the already-initialized native DDS domain; no second DDS initialization.
+  static std::mutex audio_mutex;
+  std::lock_guard<std::mutex> lock(audio_mutex);
+  static auto audio = [] {
+    auto client = std::make_unique<unitree::robot::g1::AudioClient>();
+    client->SetTimeout(1.0F);
+    client->Init();
+    return client;
+  }();
+  return audio->TtsMaker(text, 0);
 }
 
 uint64_t G1LocoController::step(const std::vector<double>& pd_target) {
@@ -606,6 +784,8 @@ void G1LocoController::set_gains(
     throw std::invalid_argument(
         "stiffness and damping must match num_dofs");
   }
+  if (!mimic_safety::ValidGains(stiffness, damping))
+    throw std::invalid_argument("invalid safety gains");
   stiffness_ = stiffness;
   damping_ = damping;
 }
@@ -616,20 +796,8 @@ int32_t G1LocoController::close() {
     return 0;
   }
 
-  if (owns_user_control_.load()) {
-    const int32_t release_result = ReleaseToInternalLocked(
-        unitree::robot::g1::InternalFsmMode::PASSIVE,
-        kPassiveFsmId);
-    if (release_result != 0 || owns_user_control_.load()) {
-      return release_result != 0 ? release_result : kBridgeInvalidState;
-    }
-  } else if (authority_state_.load() == AuthorityState::INTERNAL) {
-    const int32_t passive_result = EnsurePassiveInternalLocked();
-    if (passive_result != 0) {
-      return passive_result;
-    }
-  }
-
+  // Local shutdown only. No automatic Damp/PASSIVE or other mode request.
+  // The operator owns robot recovery; closing DDS is not a confirmed handoff.
   DisablePublishingLocked();
   ClearCommandLocked();
   closed_.store(true);
@@ -642,7 +810,7 @@ void G1LocoController::CloseNoThrow() noexcept {
   try {
     const int32_t result = close();
     if (result != 0) {
-      std::cerr << "[g1_loco_bridge] close could not confirm control release: "
+      std::cerr << "[g1_loco_bridge] local close failed: "
                 << result << std::endl;
     }
   } catch (const std::exception& error) {

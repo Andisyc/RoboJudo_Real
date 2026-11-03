@@ -44,6 +44,16 @@ G1LocoConfig ConfigFromDict(const py::dict& config) {
       GetOr<double>(config, "sdk_timeout", result.sdk_timeout);
   result.fsm_confirm_timeout = GetOr<double>(
       config, "fsm_confirm_timeout", result.fsm_confirm_timeout);
+  result.regular_confirm_timeout = GetOr<double>(
+      config, "regular_confirm_timeout", result.regular_confirm_timeout);
+  result.regular_attempts = GetOr<int>(
+      config, "regular_attempts", result.regular_attempts);
+  result.regular_fsm_id = GetOr<int>(
+      config, "regular_fsm_id", result.regular_fsm_id);
+  result.walkrun_confirm_timeout = GetOr<double>(
+      config, "walkrun_confirm_timeout", result.walkrun_confirm_timeout);
+  result.walkrun_attempts = GetOr<int>(
+      config, "walkrun_attempts", result.walkrun_attempts);
   result.stiffness = config["stiffness"].cast<std::vector<double>>();
   result.damping = config["damping"].cast<std::vector<double>>();
   return result;
@@ -52,6 +62,7 @@ G1LocoConfig ConfigFromDict(const py::dict& config) {
 }  // namespace
 
 PYBIND11_MODULE(_g1_loco_bridge_23dof, module) {
+  module.attr("MIMIC_SAFETY_REVISION") = robojudo::mimic_safety::kRevision;
   module.doc() =
       "RoboJuDo-owned Unitree G1 23DoF internal/user control handoff bridge";
 
@@ -81,6 +92,13 @@ PYBIND11_MODULE(_g1_loco_bridge_23dof, module) {
       .def_readwrite("sdk_timeout", &G1LocoConfig::sdk_timeout)
       .def_readwrite("fsm_confirm_timeout",
                      &G1LocoConfig::fsm_confirm_timeout)
+      .def_readwrite("regular_confirm_timeout",
+                     &G1LocoConfig::regular_confirm_timeout)
+      .def_readwrite("regular_attempts", &G1LocoConfig::regular_attempts)
+      .def_readwrite("regular_fsm_id", &G1LocoConfig::regular_fsm_id)
+      .def_readwrite("walkrun_confirm_timeout",
+                     &G1LocoConfig::walkrun_confirm_timeout)
+      .def_readwrite("walkrun_attempts", &G1LocoConfig::walkrun_attempts)
       .def_readwrite("stiffness", &G1LocoConfig::stiffness)
       .def_readwrite("damping", &G1LocoConfig::damping);
 
@@ -100,6 +118,7 @@ PYBIND11_MODULE(_g1_loco_bridge_23dof, module) {
   py::class_<RobotState>(module, "RobotState")
       .def(py::init<std::size_t>())
       .def_readonly("tick", &RobotState::tick)
+      .def_readonly("state_age_s", &RobotState::state_age_s)
       .def_readonly("motor_state", &RobotState::motor_state)
       .def_readonly("imu_state", &RobotState::imu_state)
       .def_readonly("torso_imu_state", &RobotState::torso_imu_state)
@@ -119,6 +138,7 @@ PYBIND11_MODULE(_g1_loco_bridge_23dof, module) {
       .def(py::init([](const py::dict& config) {
         return std::make_unique<G1LocoController>(ConfigFromDict(config));
       }))
+      .def("speak_safety_warning", &G1LocoController::speak_safety_warning, py::call_guard<py::gil_scoped_release>())
       .def("self_check", &G1LocoController::self_check)
       .def("get_robot_state", &G1LocoController::get_robot_state)
       .def("get_sport_state", &G1LocoController::get_sport_state)
@@ -139,7 +159,16 @@ PYBIND11_MODULE(_g1_loco_bridge_23dof, module) {
            py::call_guard<py::gil_scoped_release>())
       .def("release_to_passive", &G1LocoController::release_to_passive,
            py::call_guard<py::gil_scoped_release>())
-      .def("step", &G1LocoController::step, py::arg("pd_target"))
+      .def("switch_walkrun_to_regular",
+           &G1LocoController::switch_walkrun_to_regular,
+           py::call_guard<py::gil_scoped_release>())
+      .def("switch_regular_to_walkrun",
+           &G1LocoController::switch_regular_to_walkrun,
+           py::call_guard<py::gil_scoped_release>())
+      .def("sync_operator_fsm", &G1LocoController::sync_operator_fsm,
+           py::call_guard<py::gil_scoped_release>())
+      .def("get_last_fsm_trace", &G1LocoController::get_last_fsm_trace)
+      .def("step", &G1LocoController::step, py::arg("pd_target"), py::call_guard<py::gil_scoped_release>())
       .def("set_gains", &G1LocoController::set_gains,
            py::arg("stiffness"), py::arg("damping"))
       .def("close", &G1LocoController::close,
@@ -149,6 +178,15 @@ PYBIND11_MODULE(_g1_loco_bridge_23dof, module) {
       robojudo::g1_loco::kUserControlFsmId;
   module.attr("PASSIVE_FSM_ID") = robojudo::g1_loco::kPassiveFsmId;
   module.attr("WALKRUN_FSM_ID") = robojudo::g1_loco::kWalkRunFsmId;
+  module.attr("WALKRUN_V2_FSM_ID") = robojudo::g1_loco::kWalkRunV2FsmId;
+  module.attr("REGULAR_LOCO_FSM_ID") =
+      robojudo::g1_loco::kRegularLocoFsmId;
+  module.attr("REGULAR_LOCO_V2_FSM_ID") =
+      robojudo::g1_loco::kRegularLocoV2FsmId;
+  module.attr("BRIDGE_RPC_EXCEPTION") =
+      robojudo::g1_loco::kBridgeRpcException;
+  module.attr("BRIDGE_FSM_UNCONFIRMED") =
+      robojudo::g1_loco::kBridgeFsmUnconfirmed;
   module.attr("BRIDGE_INVALID_STATE") =
       robojudo::g1_loco::kBridgeInvalidState;
   module.attr("BRIDGE_NO_ROBOT_STATE") =

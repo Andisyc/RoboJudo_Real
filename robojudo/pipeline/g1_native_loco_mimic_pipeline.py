@@ -107,6 +107,11 @@ class G1NativeLocoMimicPipeline(Pipeline):
         )
         self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
 
+        # Targets returned by PolicyWrapper are already in environment order.
+        self._hip_bias_indices = [
+            list(self.env.joint_names).index(name)
+            for name in ("left_hip_pitch_joint", "right_hip_pitch_joint")
+        ]
         self.freq = self.policy.cfg_policy.freq
         self.dt = 1.0 / self.freq
         self.state = NativeLocoMimicState.NATIVE_LOCO
@@ -304,6 +309,11 @@ class G1NativeLocoMimicPipeline(Pipeline):
         self._step_errors = 0
         self._clear_stop_flags()
         self.trace_event("native_state", state=self.state.name)
+        self.trace_event(
+            "fixed_hip_bias", **self.cfg.fixed_hip_bias.model_dump(),
+            policy_matches=self.policy.cfg_policy.policy_name == self.cfg.fixed_hip_bias.policy_name,
+            joint_names=["left_hip_pitch_joint", "right_hip_pitch_joint"],
+        )
         logger.warning("G1 user control acquired; mimic policy active: %s", status)
         return extras, pd_target
 
@@ -666,10 +676,37 @@ class G1NativeLocoMimicPipeline(Pipeline):
         if self._step_errors >= self.MAX_CONSECUTIVE_STEP_ERRORS:
             self._request_handback(f"{self._step_errors} consecutive step errors: {exc!r}")
 
+    def _apply_fixed_hip_bias(self, target, query_frame):
+        """Copy-on-write offset, with no feedback adaptation or accumulated state."""
+        cfg = self.cfg.fixed_hip_bias
+        if (not cfg.enabled or cfg.hip_pitch_deg == 0
+                or self.policy.cfg_policy.policy_name != cfg.policy_name):
+            return target
+
+        a, b = cfg.ramp_in_start, cfg.ramp_in_end
+        c, d = cfg.ramp_out_start, cfg.ramp_out_end
+        if query_frame <= a or query_frame >= d:
+            return target
+
+        if query_frame < b:
+            x = (query_frame - a) / (b - a)
+        elif query_frame > c:
+            x = (d - query_frame) / (d - c)
+        else:
+            x = 1.0
+        # Quintic fade: zero first and second derivatives at both ends.
+        weight = x**3 * (10 - 15*x + 6*x*x)
+        corrected = target.copy()
+        corrected[self._hip_bias_indices] += np.deg2rad(cfg.hip_pitch_deg) * weight
+        return corrected
+
     def _step_mimic(self, env_data, ctrl_data):
         # Runtime observations and outputs are assumed valid per deployment scope.
         observation, extras = self.policy.get_observation(env_data, ctrl_data)
+        # Match the exact integer time_step sent to ONNX, before the callback advances it.
+        query_frame = int(self.policy.timestep)
         pd_target = self.policy.get_pd_target(observation)
+        pd_target = self._apply_fixed_hip_bias(pd_target, query_frame)
         self.send_traced(pd_target, extras.get("hand_pose", None), commands=ctrl_data.get("COMMANDS", []))
         return extras, pd_target
 

@@ -3,7 +3,7 @@ import importlib.abc
 from pathlib import Path
 import runpy
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -75,6 +75,72 @@ class TestNativeIntegration(unittest.TestCase):
                 self.assertEqual(cfg.mimic_policies[0].max_timestep, steps)
                 self.assertFalse(cfg.env.update_with_fk)
                 self.assertIsNone(cfg.env.forward_kinematic)
+
+    def test_fixed_hip_bias_at_send_boundary(self):
+        import numpy as np
+        from pydantic import ValidationError
+        from robojudo.pipeline.pipeline_cfgs import FixedHipBiasCfg
+
+        cfg = self.config("g1_native_loco_mimic_23dof_backpack")
+        self.assertFalse(cfg.fixed_hip_bias.enabled)
+        self.assertEqual(cfg.mimic_policies[0].policy_name, "eight_cut_1_backpack")
+        cfg.fixed_hip_bias = FixedHipBiasCfg(enabled=True)
+        pipeline_type = pipeline_registry.get("G1NativeLocoMimicPipeline")
+        pipeline = pipeline_type.__new__(pipeline_type)  # Never construct SDK/environment.
+        pipeline.cfg = cfg
+        names = list(reversed(cfg.env.dof.joint_names))  # Deliberately different order.
+        pipeline._hip_bias_indices = [names.index(n) for n in
+                                     ("left_hip_pitch_joint", "right_hip_pitch_joint")]
+        original = np.linspace(-0.2, 0.2, len(names), dtype=np.float32)
+        baseline = original.copy()
+        action_history = np.ones(len(names), dtype=np.float32)
+        policy = SimpleNamespace(
+            cfg_policy=SimpleNamespace(policy_name=cfg.fixed_hip_bias.policy_name),
+            timestep=0, play_speed=1., last_action=action_history.copy(),
+            get_observation=Mock(return_value=("observation", {"hand_pose": "hands"})),
+            get_pd_target=Mock(return_value=original),
+        )
+        pipeline.policy_manager = SimpleNamespace(policy=policy)
+        pipeline.send_traced = Mock()
+
+        def sent(frame):
+            policy.timestep = frame
+            _, target = pipeline._step_mimic({}, {"COMMANDS": ["test"]})
+            np.testing.assert_array_equal(pipeline.send_traced.call_args.args[0], target)
+            self.assertEqual(pipeline.send_traced.call_args.args[1], "hands")
+            self.assertEqual(pipeline.send_traced.call_args.kwargs["commands"], ["test"])
+            return target
+
+        # Independently specified boundary/midpoint values, not the implementation formula.
+        for frame, fraction in [(1099, 0), (1100, 0), (1120.9, .5), (1140, 1),
+                                (1200, 1), (1310, 1), (1330, .5), (1350, 0), (2550, 0)]:
+            with self.subTest(frame=frame):
+                expected = np.zeros_like(original)
+                expected[pipeline._hip_bias_indices] = np.deg2rad(.5) * fraction
+                np.testing.assert_allclose(sent(frame) - baseline, expected, atol=2e-8, rtol=0)
+
+        # Frozen query frames retain the same bias; repeated calls never accumulate it.
+        policy.play_speed = 0
+        paused = sent(1120).copy()
+        np.testing.assert_array_equal(sent(1120), paused)
+        np.testing.assert_array_equal(sent(0), baseline)  # Replay/reset starts outside the window.
+        policy.cfg_policy.policy_name = "different_motion"
+        np.testing.assert_array_equal(sent(1200), baseline)
+        policy.cfg_policy.policy_name = cfg.fixed_hip_bias.policy_name
+        cfg.fixed_hip_bias.enabled = False
+        self.assertIs(sent(1200), original)
+        cfg.fixed_hip_bias.enabled = True
+        cfg.fixed_hip_bias.hip_pitch_deg = 0
+        self.assertIs(sent(1200), original)
+        np.testing.assert_array_equal(original, baseline)
+        np.testing.assert_array_equal(policy.last_action, action_history)
+
+        for invalid in ({"hip_pitch_deg": float("nan")}, {"hip_pitch_deg": float("inf")},
+                        {"hip_pitch_deg": .51}, {"hip_pitch_deg": -.1},
+                        {"ramp_in_end": 1100}, {"ramp_in_start": -1},
+                        {"ramp_out_start": 1350}, {"policy_name": " "}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValidationError):
+                FixedHipBiasCfg(**invalid)
 
     def test_both_dofs_import_same_bridge_and_reject_stale_binary(self):
         bridge = ModuleType("g1_loco_bridge")

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 from typing import Union, List, Optional
 from typing import Any
 
@@ -93,6 +94,28 @@ class RlLocoMimicPipelineCfg(PipelineCfg):
         return self
 
 
+class FixedHipBiasCfg(Config):
+    """Human-selected, query-frame-based target offset; disabled by default."""
+
+    enabled: bool = False
+    policy_name: str = "eight_cut_1_v034_1.2x"
+    hip_pitch_deg: float = 0.5
+    ramp_in_start: int = 1100
+    ramp_in_end: int = 1140
+    ramp_out_start: int = 1310
+    ramp_out_end: int = 1350
+
+    @model_validator(mode="after")
+    def check_fixed_hip_bias(self):
+        if not self.policy_name.strip():
+            raise ValueError("fixed_hip_bias requires a policy_name")
+        if not math.isfinite(self.hip_pitch_deg) or not 0 <= self.hip_pitch_deg <= 0.5:
+            raise ValueError("fixed_hip_bias.hip_pitch_deg must be finite and in [0, 0.5]")
+        if not 0 <= self.ramp_in_start < self.ramp_in_end < self.ramp_out_start < self.ramp_out_end:
+            raise ValueError("fixed_hip_bias requires 0 <= start < fade-in end < fade-out start < end")
+        return self
+
+
 class G1NativeLocoMimicPipelineCfg(PipelineCfg):
     """One native-loco/Mimic controller for both 23DoF and 29DoF G1."""
 
@@ -103,6 +126,7 @@ class G1NativeLocoMimicPipelineCfg(PipelineCfg):
     mimic_policies: list[PolicyCfg | Any] = []
     return_to_regular_loco: bool = True
     walkrun_on_start: bool = True
+    fixed_hip_bias: FixedHipBiasCfg = FixedHipBiasCfg()
 
     @model_validator(mode="after")
     def check_native_loco_mimic(self):

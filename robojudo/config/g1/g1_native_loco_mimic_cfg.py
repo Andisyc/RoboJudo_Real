@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from robojudo.config import cfg_registry
 from robojudo.controller.ctrl_cfgs import UnitreeCtrlCfg
-from robojudo.pipeline.pipeline_cfgs import G1NativeLocoMimicPipelineCfg
+from robojudo.pipeline.pipeline_cfgs import FixedHipBiasCfg, G1NativeLocoMimicPipelineCfg
 
 from .env.g1_env_cfg import G1_23DoF
 from .env.g1_loco_env_cfg import G1LocoEnvCfg, G1LocoUnitreeCfg
@@ -54,8 +54,8 @@ class g1_native_loco_mimic(G1NativeLocoMimicPipelineCfg):
 class g1_native_loco_mimic_v2(g1_native_loco_mimic):
     """Compatibility config; uses the same native controller without auto-switching."""
 
-    return_to_regular_loco: bool = False
-    walkrun_on_start: bool = False
+    return_to_regular_loco: bool = True
+    walkrun_on_start: bool = True
     env: G1LocoEnvCfg = G1LocoEnvCfg(
         unitree=G1LocoUnitreeCfg(net_if="enP8p1s0"),
     )
@@ -94,6 +94,18 @@ class g1_native_loco_mimic_23dof(G1NativeLocoMimicPipelineCfg):
 @cfg_registry.register
 class g1_native_loco_mimic_23dof_backpack(G1NativeLocoMimicPipelineCfg):
     """Unitree native WALKRUN handoff to the backpack-trained 23DoF policy."""
+
+    # Candidate first-raise window. Align video to query frames before enabling.
+    # Deliberately preserve mimic_policies below; a different model must not match.
+    fixed_hip_bias: FixedHipBiasCfg = FixedHipBiasCfg(
+        enabled=False,
+        policy_name="eight_cut_1_v034_1.2x",
+        hip_pitch_deg=0.5,
+        ramp_in_start=1100,
+        ramp_in_end=1140,
+        ramp_out_start=1310,
+        ramp_out_end=1350,
+    )
 
     env: G1LocoEnvCfg = G1LocoEnvCfg(
         unitree=G1LocoUnitreeCfg(net_if="enP8p1s0", regular_fsm_id=501),

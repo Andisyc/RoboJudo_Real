@@ -133,3 +133,16 @@ class g1_native_loco_mimic_23dof_backpack(G1NativeLocoMimicPipelineCfg):
         ),
     ]
     do_safety_check: bool = True
+
+
+@cfg_registry.register
+class g1_native_loco_mimic_23dof_backpack_cut3_recovery(g1_native_loco_mimic_23dof_backpack):
+    """Offline-tested Cut3 recovery candidate; preserves the original model list."""
+
+    mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = [
+        G1BeyondMimic23DoFPolicyCfg(
+            policy_name="cut3_recovery_r1_i80",
+            without_state_estimator=False,
+            max_timestep=5299,
+        ),
+    ]

@@ -129,9 +129,34 @@ bool G1LocoController::self_check() {
   if (!initialized_.load() || closed_.load()) {
     return false;
   }
-  if (!robot_state_buffer_.GetData()) {
+  const auto sample = robot_state_buffer_.GetData();
+  if (!sample || !mimic_safety::Fresh(
+                     SteadySeconds() - std::min(sample->received_time, sample->tick_time))) {
     return false;
   }
+
+  // Unitree's G1 machine types for the standard 23- and 29-DoF joint sets.
+  // https://github.com/unitreerobotics/unitree_ros/tree/master/robots/g1_description#overview
+  const auto machine = mode_machine_.load();
+  std::size_t hardware_dofs;
+  switch (machine) {
+    case 1: case 4: case 10:
+      hardware_dofs = kG123DofMotorIndices.size();
+      break;
+    case 2: case 5: case 11: case 13: case 15: case 18:
+      hardware_dofs = kG1FullDofCount;
+      break;
+    default:
+      throw std::runtime_error("G1 startup refused: unsupported mode_machine=" +
+                               std::to_string(machine));
+  }
+  if (hardware_dofs != num_dofs_) {
+    throw std::runtime_error("G1 startup refused: hardware is " +
+                             std::to_string(hardware_dofs) + " DoF (mode_machine=" +
+                             std::to_string(machine) + "), configuration expects " +
+                             std::to_string(num_dofs_) + " DoF");
+  }
+
   if (config_.enable_odometry && !sport_state_buffer_.GetData()) {
     return false;
   }

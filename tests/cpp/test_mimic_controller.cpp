@@ -28,6 +28,38 @@ void sample(G1LocoController& c,double age=0){RobotState s(TEST_DOFS);auto q=tar
 bool throws(const std::function<void()>& f){try{f();return false;}catch(...){return true;}}
 void no_mode_requests(){assert(fake_sdk::passive_calls==0 && fake_sdk::damp_calls==0 && fake_sdk::passive_mode_calls==0);}
 int main(){int cases=0;
+ {
+  fake_sdk::reset();
+  G1LocoController c(cfg());
+  assert(!c.self_check());
+  c.mode_machine_.store(TEST_DOFS == 23 ? 4 : 5);
+  sample(c, .2);
+  assert(!c.self_check());
+  sample(c);
+  assert(c.self_check());
+  c.mode_machine_.store(TEST_DOFS == 23 ? 10 : 11);
+  assert(c.self_check());
+
+  const auto check_rejected = [&](uint8_t machine, const std::string& message) {
+   c.mode_machine_.store(machine);
+   sample(c);
+   try {
+    c.self_check();
+    assert(false && "incompatible G1 must be refused during self_check");
+   } catch (const std::runtime_error& error) {
+    assert(std::string(error.what()).find(message) != std::string::npos);
+   }
+  };
+  if (TEST_DOFS == 23) {
+   check_rejected(5, "hardware is 29 DoF (mode_machine=5), configuration expects 23 DoF");
+  } else {
+   check_rejected(4, "hardware is 23 DoF (mode_machine=4), configuration expects 29 DoF");
+  }
+  check_rejected(23, "unsupported mode_machine=23");
+  assert(fake_sdk::writes == 0 && fake_sdk::user_calls == 0);
+  no_mode_requests();
+  ++cases;
+ }
  for(int mode=0;mode<5;++mode){fake_sdk::reset();{G1LocoController c(cfg());sample(c);auto q=target();
   if(mode==0)q[3]=12.57;if(mode==1)q[0]=std::numeric_limits<double>::quiet_NaN();if(mode==2)q[0]=std::numeric_limits<double>::infinity();if(mode==3)q.resize(TEST_DOFS-1);if(mode==4)q[0]=1.;
   assert(throws([&]{c.acquire_user_control(q);}));assert(fake_sdk::writes==0 && fake_sdk::user_calls==0);c.close();}no_mode_requests();++cases;

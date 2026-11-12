@@ -3,9 +3,11 @@ import importlib.abc
 import os
 from pathlib import Path
 import sys
+import time
 from types import SimpleNamespace as NS
 from unittest.mock import Mock, patch
 import unittest
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -20,7 +22,7 @@ try:
     from fastapi.testclient import TestClient
     from scripts import run_service as api
     from robojudo.pipeline.g1_baduanjin_suite_pipeline import G1BaduanjinSuitePipeline
-    from robojudo.pipeline.g1_native_loco_mimic_pipeline import NativeLocoMimicState
+    from robojudo.pipeline.g1_native_loco_mimic_pipeline import G1NativeLocoMimicPipeline, NativeLocoMimicState
 finally:
     sys.meta_path.remove(_guard)
 
@@ -77,14 +79,67 @@ class TestHTTPCompatibility(unittest.TestCase):
         p.step = step
         return p
 
-    def start(self):
-        response = self.client.post('/start', json={'config_name': 'g1_baduanjin_23dof_suite'})
+    def start(self, config='g1_baduanjin_23dof_suite'):
+        response = self.client.post('/start', json={'config_name': config})
         self.assertEqual(response.status_code, 200, response.text)
         return api.pipeline
 
     def drain(self):
         api.stop_event.clear()
         api.control_loop()
+
+    def real_entry_dispatch(self, p):
+        """Use real Start/entry selection, replacing only reference and acquisition I/O."""
+        p._start_pressed = G1NativeLocoMimicPipeline._start_pressed.__get__(p)
+        for policy in p.policy_manager.policies:
+            policy.motion_anchor_body_index = 0
+            policy.command = {'body_quat_w': np.array([[1., 0., 0., 0.]]),
+                              'body_pos_w': np.array([[0., 0., .8]])}
+            policy.timestep = policy.cfg_policy.max_timestep
+            policy.reset = Mock(side_effect=lambda actor=policy: setattr(actor, 'timestep', 0))
+        entered = []
+        def acquire(actor, data, ctrl):
+            if actor.state == NativeLocoMimicState.NATIVE_LOCO and not actor._entry_blocked:
+                entered.append((actor.policy_manager.current_policy_id, actor.policy.timestep))
+                actor.state = NativeLocoMimicState.MIMIC_ACTIVE
+        patcher = patch.object(G1NativeLocoMimicPipeline, '_enter_mimic', autospec=True, side_effect=acquire)
+        patcher.start(); self.addCleanup(patcher.stop)
+        return entered
+
+    def test_http_enter_alone_starts_cut1_again_after_suite_or_early_stop(self):
+        p = self.start(); entered = self.real_entry_dispatch(p)
+        for previous in (0, 2, 1):
+            with self.subTest(previous=previous):
+                p.state = NativeLocoMimicState.NATIVE_LOCO
+                p.policy_manager._current_policy_id = previous
+                p.policy_manager.policies[0].timestep = 8627
+                self.assertEqual(self.client.post('/enter_mimic').status_code, 200)
+                self.drain()
+                self.assertEqual(entered[-1], (0, 0))
+                self.assertEqual(self.client.get('/status').json()['sequence_index'], 0)
+        self.assertEqual(len(entered), 3)
+
+    def test_http_single_segment_still_starts_selected_cut(self):
+        p = self.start('g1_baduanjin_23dof_select'); entered = self.real_entry_dispatch(p)
+        self.assertEqual(self.client.post('/select_policy', json={'sequence_index': 2}).status_code, 200)
+        self.client.post('/enter_mimic'); self.drain()
+        self.assertEqual(entered, [(2, 0)])
+
+    def test_repeated_enter_during_dance_or_walkrun_wait_does_not_reset(self):
+        p = self.start(); entered = self.real_entry_dispatch(p)
+        p.policy_manager._current_policy_id = 2
+        p.state = NativeLocoMimicState.MIMIC_ACTIVE
+        self.client.post('/enter_mimic'); self.drain()
+        self.assertEqual(entered, []); self.assertEqual(p.policy_manager.current_policy_id, 2)
+        p.state = NativeLocoMimicState.NATIVE_LOCO
+        p._walkrun_entry_deadline = time.monotonic() + 30
+        self.client.post('/enter_mimic'); self.drain()
+        self.assertEqual(entered, []); self.assertEqual(p.policy_manager.current_policy_id, 2)
+        # The original delayed WALKRUN entry must eventually select cut1 too.
+        p._walkrun_still_since = time.monotonic() - 2
+        p._held_still = Mock(return_value=p._walkrun_still_since)
+        p._advance_walkrun_entry({}, {})
+        self.assertEqual(entered, [(0, 0)])
 
     def test_original_start_enter_routes_select_suite_and_deliver_start_command(self):
         api.pending_commands.append('[POLICY_MIMIC]')  # Must not survive an old session.

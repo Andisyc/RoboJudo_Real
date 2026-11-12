@@ -49,11 +49,20 @@ class G1BaduanjinSuitePipeline(G1NativeLocoMimicPipeline):
         return result
 
     def _enter_mimic(self, env_data, ctrl_data):
-        if self.state == NativeLocoMimicState.NATIVE_LOCO:
+        if self.state == NativeLocoMimicState.NATIVE_LOCO and not self._entry_blocked:
             self._suite_cancelled = False
             # A previous continuous transition changed only this model's
             # alignment. A fresh Start must restore its original anchor first.
             try:
+                if self.cfg.auto_sequence:
+                    previous_index = self.policy_manager.current_policy_id
+                    if previous_index != 0:
+                        self.policy_manager.set_policy(0)
+                    self.freq = self.policy.cfg_policy.freq
+                    self.dt = 1.0 / self.freq
+                    self.trace_event('suite_start', previous_index=previous_index,
+                                     start_index=0, model=self.policy.cfg_policy.policy_name)
+                    logger.warning("SUITE_START: starting from cut1 (previous index %d)", previous_index)
                 self.policy.reset()
                 raw = raw_policy(self.policy)
                 anchor = raw.motion_anchor_body_index

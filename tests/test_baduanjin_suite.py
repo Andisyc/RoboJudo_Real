@@ -32,6 +32,7 @@ class Manager:
     @property
     def policy(self):return self.policies[self._current_policy_id]
     def policy_by_id(self,i):return self.policies[i]
+    def set_policy(self,i):self._current_policy_id=i
 
 class TestSuite(unittest.TestCase):
     def make(self):
@@ -40,6 +41,7 @@ class TestSuite(unittest.TestCase):
         p.cfg=NS(auto_sequence=True,segment_transition_s=3.)
         p.state=NativeLocoMimicState.MIMIC_ACTIVE;p._hold=False;p._handback_reason=None;p._stop_reason=None;p.timestep=0
         p._motion_trace=None;p._step_errors=0
+        p._entry_blocked=False
         p.data={'base_quat':R.from_euler('z',.4).as_quat(),'torso_quat':R.from_euler('z',.4).as_quat(),
                 'dof_pos':np.array([.1,.3]),'torso_pos':np.array([3.,4.,.8])}
         p.env=NS(joint_names=NAMES,update=Mock(),get_data=lambda:p.data,step=Mock(return_value=0),reset=Mock())
@@ -105,6 +107,40 @@ class TestSuite(unittest.TestCase):
             p._enter_mimic(p.data,{})
         aligned=p.policy.command_init_align.align_quat(p.policy.command['body_quat_w'][0][[1,2,3,0]])
         self.assertAlmostEqual(R.from_quat(aligned).as_euler('xyz')[2],0.)
+
+    def test_every_suite_entry_starts_cut1_from_frame_zero(self):
+        p=self.make();p.state=NativeLocoMimicState.NATIVE_LOCO
+        for previous in (0,1,2):
+            with self.subTest(previous=previous):
+                p.policy_manager._current_policy_id=previous
+                p.policy_manager.policies[0].timestep=20
+                with patch.object(G1NativeLocoMimicPipeline,'_enter_mimic') as enter:
+                    p._enter_mimic(p.data,{})
+                    enter.assert_called_once()
+                self.assertEqual(p.policy_manager.current_policy_id,0)
+                self.assertEqual(p.policy.timestep,0)
+
+    def test_single_segment_entry_keeps_selected_cut(self):
+        p=self.make();p.state=NativeLocoMimicState.NATIVE_LOCO;p.cfg.auto_sequence=False
+        for selected in (1,2):
+            with self.subTest(selected=selected):
+                p.policy_manager._current_policy_id=selected;p.policy.timestep=20
+                with patch.object(G1NativeLocoMimicPipeline,'_enter_mimic'):
+                    p._enter_mimic(p.data,{})
+                self.assertEqual(p.policy_manager.current_policy_id,selected)
+                self.assertEqual(p.policy.timestep,0)
+
+    def test_active_or_blocked_entry_never_resets_cut(self):
+        p=self.make();p.policy_manager._current_policy_id=2;p.policy.timestep=12
+        for state,blocked in ((NativeLocoMimicState.MIMIC_ACTIVE,False),
+                              (NativeLocoMimicState.HANDBACK,False),
+                              (NativeLocoMimicState.NATIVE_LOCO,True)):
+            with self.subTest(state=state,blocked=blocked):
+                p.state=state;p._entry_blocked=blocked
+                with patch.object(G1NativeLocoMimicPipeline,'_enter_mimic'):
+                    p._enter_mimic(p.data,{})
+                self.assertEqual(p.policy_manager.current_policy_id,2)
+                self.assertEqual(p.policy.timestep,12)
 
     def test_entry_reset_failure_uses_existing_rejection_without_acquiring(self):
         p=self.make();p.state=NativeLocoMimicState.NATIVE_LOCO

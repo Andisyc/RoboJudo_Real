@@ -127,9 +127,15 @@ class G1NativeLocoMimicPipelineCfg(PipelineCfg):
     return_to_regular_loco: bool = True
     walkrun_on_start: bool = True
     fixed_hip_bias: FixedHipBiasCfg = FixedHipBiasCfg()
+    # Opt-in reference transitions; all existing launch configurations remain unchanged.
+    entry_pose_transition_s: float = 0.0
+    exit_pose_transition_s: float = 0.0
 
     @model_validator(mode="after")
     def check_native_loco_mimic(self):
+        for duration in (self.entry_pose_transition_s, self.exit_pose_transition_s):
+            if not math.isfinite(duration) or not 0 <= duration <= 10:
+                raise ValueError("pose transition duration must be finite and in [0, 10] seconds")
         if not self.mimic_policies:
             raise ValueError("At least one mimic policy is required")
         if self.return_to_regular_loco and not self.env.act:

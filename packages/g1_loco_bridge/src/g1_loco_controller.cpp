@@ -669,6 +669,11 @@ int32_t G1LocoController::SwitchInternalFsmLocked(
       request_result = kBridgeRpcException;
     }
     last_loco_api_result_.store(request_result);
+    // Query calls overwrite last_loco_api_result_; preserve the actual request
+    // argument and ACK in the process log before doing any readback.
+    std::cerr << "FSM_REQUEST attempt=" << attempt
+              << " requested_fsm_id=" << request_fsm_id
+              << " request_result=" << request_result << std::endl;
     if (request_result != 0) {
       result = request_result;
     }

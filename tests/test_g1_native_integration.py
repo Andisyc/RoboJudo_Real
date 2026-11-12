@@ -159,6 +159,30 @@ class TestNativeIntegration(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "23 or 29"):
             _load_g1_loco_bridge(12)
 
+    def test_cut3_candidates_are_isolated_from_original_routes(self):
+        original=self.config("g1_native_loco_mimic_23dof_backpack_cut3_recovery")
+        switch=self.config("g1_native_loco_mimic_23dof_backpack_cut3_fsm500")
+        pitch=self.config("g1_native_loco_mimic_23dof_backpack_cut3_pitch")
+        ramp=self.config("g1_native_loco_mimic_23dof_backpack_cut3_transition")
+        entry=self.config("g1_native_loco_mimic_23dof_backpack_cut3_entry_transition")
+        self.assertEqual((entry.entry_pose_transition_s,entry.exit_pose_transition_s),(3.,0.))
+        self.assertEqual(original.env.unitree.regular_fsm_id,501)
+        self.assertEqual(original.mimic_policies[0].policy_name,"cut3_recovery_r1_i80")
+        self.assertEqual(switch.mimic_policies[0].policy_name,original.mimic_policies[0].policy_name)
+        for cfg in (switch,pitch,ramp):
+            self.assertEqual(cfg.env.unitree.regular_fsm_id,500)
+            self.assertEqual(len(cfg.env.dof.joint_names),23)
+            self.assertFalse(cfg.env.update_with_fk)
+            self.assertEqual(cfg.env.odometry_type,original.env.odometry_type)
+            self.assertEqual(cfg.mimic_policies[0].max_timestep,5299)
+        self.assertEqual(pitch.mimic_policies[0].policy_name,"cut3_pitch_ref4_20261112")
+        self.assertEqual(pitch.entry_pose_transition_s,0)
+        self.assertEqual(pitch.exit_pose_transition_s,0)
+        self.assertEqual((ramp.entry_pose_transition_s,ramp.exit_pose_transition_s),(3.,3.))
+        self.assertEqual(self.config("g1_native_loco_mimic").env.unitree.regular_fsm_id,501)
+        switch.env.unitree.regular_fsm_id=501
+        self.assertEqual(pitch.env.unitree.regular_fsm_id,500)
+
     def test_original_cli_resolves_shared_pipeline_without_hardware(self):
         # Exercise the official parser/ConfigManager/registry path, replacing
         # construction before it can subscribe to DDS or request any mode.

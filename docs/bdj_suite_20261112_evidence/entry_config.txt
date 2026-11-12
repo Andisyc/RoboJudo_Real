@@ -1,0 +1,16 @@
+11-12 15:57:54.669 [DEBUG] [robojudo] ========== robojudo-1.5.0 init done ==========
+配置: g1_baduanjin_23dof_suite; pipeline: G1BaduanjinSuitePipeline
+网卡: enP8p1s0; DoF: 23; bridge: g1_loco_bridge; 要求版本: 2026110310
+regular_fsm_id: 500; walkrun_on_start: True
+模型: /data/lizhe/bdj_suite_20261112/repo/assets/models/g1/beyondmimic/cut1_scratch_v2_i15000_zero_translation.onnx; max_timestep: 8627
+模型: /data/lizhe/bdj_suite_20261112/repo/assets/models/g1/beyondmimic/eight_cut_2_v010_1.2x.onnx; max_timestep: 5960
+模型: /data/lizhe/bdj_suite_20261112/repo/assets/models/g1/beyondmimic/cut3_pitch_ref6_20261112.onnx; max_timestep: 5299
+配置和模型路径检查通过；未加载硬件 SDK、未创建环境。
+11-12 15:57:58.052 [DEBUG] [robojudo] ========== robojudo-1.5.0 init done ==========
+配置: g1_baduanjin_23dof_select; pipeline: G1BaduanjinSuitePipeline
+网卡: enP8p1s0; DoF: 23; bridge: g1_loco_bridge; 要求版本: 2026110310
+regular_fsm_id: 500; walkrun_on_start: True
+模型: /data/lizhe/bdj_suite_20261112/repo/assets/models/g1/beyondmimic/cut1_scratch_v2_i15000_zero_translation.onnx; max_timestep: 8627
+模型: /data/lizhe/bdj_suite_20261112/repo/assets/models/g1/beyondmimic/eight_cut_2_v010_1.2x.onnx; max_timestep: 5960
+模型: /data/lizhe/bdj_suite_20261112/repo/assets/models/g1/beyondmimic/cut3_pitch_ref6_20261112.onnx; max_timestep: 5299
+配置和模型路径检查通过；未加载硬件 SDK、未创建环境。

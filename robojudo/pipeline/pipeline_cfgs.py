@@ -141,3 +141,19 @@ class G1NativeLocoMimicPipelineCfg(PipelineCfg):
         if self.return_to_regular_loco and not self.env.act:
             raise ValueError("return_to_regular_loco requires env.act=True")
         return self
+
+
+class G1BaduanjinSuitePipelineCfg(G1NativeLocoMimicPipelineCfg):
+    pipeline_type: str = "G1BaduanjinSuitePipeline"
+    auto_sequence: bool = True
+    segment_transition_s: float = 3.0
+
+    @model_validator(mode="after")
+    def check_suite(self):
+        if len(self.mimic_policies) != 3 or self.env.dof.num_dofs != 23:
+            raise ValueError("Suite requires exactly three 23DoF policies")
+        if not math.isfinite(self.segment_transition_s) or not 1 <= self.segment_transition_s <= 10:
+            raise ValueError("segment_transition_s must be in [1, 10]")
+        if self.exit_pose_transition_s != 0:
+            raise ValueError("Unaccepted default-standing exit transition is disabled for the suite")
+        return self

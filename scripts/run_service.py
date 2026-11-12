@@ -12,7 +12,7 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictInt
 
 import robojudo.pipeline
 from robojudo.config.config_manager import ConfigManager
@@ -24,6 +24,11 @@ app = FastAPI(title="RoboJuDo Robot Service", version="1.0.0")
 
 class StartRequest(BaseModel):
     config_name: str = "g1_native_loco_mimic"
+
+
+class SelectPolicyRequest(BaseModel):
+    policy_name: Optional[str] = None
+    sequence_index: Optional[StrictInt] = None
 
 
 # Global state
@@ -100,8 +105,15 @@ def start_robot(request: StartRequest):
         cfg = config_manager.get_cfg()
         pipeline_class = getattr(robojudo.pipeline, cfg.pipeline_type)
         pipeline = pipeline_class(cfg=cfg)
+        record_dir = os.environ.get("ROBOJUDO_RECORD_DIR")
+        if record_dir:
+            pipeline.configure_motion_trace(record_dir, os.environ.get("ROBOJUDO_RUN_ID", record_dir))
+        pipeline._motion_trace_phase = "preparing"
         pipeline.prepare()
+        pipeline._motion_trace_phase = "playing"
 
+        with commands_lock:
+            pending_commands.clear()
         stop_event.clear()
         control_thread = threading.Thread(target=control_loop, daemon=True)
         control_thread.start()
@@ -151,11 +163,42 @@ def get_status():
                 "state": pipeline.state.name,
                 "env": env_status,
                 "policy": getattr(pipeline.policy, "name", None),
+                "policy_name": getattr(pipeline, "current_policy_name", lambda: "")(),
+                "sequence_index": pipeline.policy_manager.current_policy_id,
+                "config_name": type(pipeline.cfg).__name__,
                 "timestep": getattr(pipeline, "timestep", 0),
             }
     except Exception as e:
         logger.error(f"Error getting status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/policies")
+def get_policies():
+    """Names of preloaded models; mirrors the existing field-service API."""
+    if pipeline is None:
+        raise HTTPException(status_code=400, detail="Robot not started")
+    if not hasattr(pipeline, "available_policy_names"):
+        raise HTTPException(status_code=501, detail="Pipeline does not expose policy names")
+    with pipeline_lock:
+        return {"policies": pipeline.available_policy_names()}
+
+
+@app.post("/select_policy")
+def select_policy(request: SelectPolicyRequest):
+    """Select a model in native mode; does not enter mimic or request control."""
+    if pipeline is None:
+        raise HTTPException(status_code=400, detail="Robot not started")
+    if bool(request.policy_name) == (request.sequence_index is not None):
+        raise HTTPException(status_code=422, detail="specify exactly one of policy_name or sequence_index")
+    try:
+        with pipeline_lock:
+            if not hasattr(pipeline, "select_policy"):
+                raise ValueError("pipeline does not support exact policy selection")
+            index, name = pipeline.select_policy(request.policy_name, request.sequence_index)
+        return {"status": "selected", "policy_name": name, "sequence_index": index}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/enter_mimic")

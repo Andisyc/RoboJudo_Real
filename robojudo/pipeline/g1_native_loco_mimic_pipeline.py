@@ -148,6 +148,36 @@ class G1NativeLocoMimicPipeline(Pipeline):
     def policy(self):
         return self.policy_manager.policy
 
+    def available_policy_names(self):
+        return [str(policy.cfg_policy.policy_name) for policy in self.policy_manager.policies]
+
+    def current_policy_name(self):
+        return str(self.policy.cfg_policy.policy_name)
+
+    def select_policy(self, policy_name=None, sequence_index=None):
+        """Preserve the deployed HTTP service's exact-name / zero-based selection."""
+        if self.state != NativeLocoMimicState.NATIVE_LOCO:
+            raise ValueError("policy can only be selected in native loco state")
+        if self._walkrun_entry_deadline is not None:
+            raise ValueError("policy cannot be selected while mimic entry is pending")
+        if bool(policy_name) == (sequence_index is not None):
+            raise ValueError("specify exactly one of policy_name or sequence_index")
+        if policy_name:
+            matches = [i for i, name in enumerate(self.available_policy_names()) if name == policy_name]
+            if len(matches) != 1:
+                raise ValueError(f"loaded policy not found or ambiguous: {policy_name}")
+            index = matches[0]
+        else:
+            if isinstance(sequence_index, bool) or not isinstance(sequence_index, int):
+                raise ValueError("sequence_index must be an integer")
+            index = sequence_index
+            if not 0 <= index < self.policy_manager.num_policies:
+                raise ValueError(f"sequence_index out of range: {index}")
+        self.policy_manager.set_policy(index)
+        self.freq = self.policy.cfg_policy.freq
+        self.dt = 1.0 / self.freq
+        return index, self.current_policy_name()
+
     def self_check(self):
         self.env.self_check()
         self.env.update()

@@ -27,7 +27,7 @@ def main():
     from robojudo.config.config_manager import ConfigManager
 
     cfg = ConfigManager(config_name=args.config).get_cfg()
-    if cfg.pipeline_type != "G1NativeLocoMimicPipeline":
+    if cfg.pipeline_type not in ("G1NativeLocoMimicPipeline", "G1BaduanjinSuitePipeline"):
         raise SystemExit("错误：当前配置不是 G1 native-loco 配置。")
     if cfg.env.is_sim or cfg.env.env_type != "G1LocoEnv":
         raise SystemExit("错误：当前配置不是 G1 native 真机配置。")

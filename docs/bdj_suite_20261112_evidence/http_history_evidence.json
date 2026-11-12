@@ -1,0 +1,54 @@
+{
+  "bundled_service": {
+    "archive": "优化后-数据log.zip",
+    "member_basename": "run_service.log",
+    "sha256": "021e594d71c4be3e2ef677530d613c83f5d22ec8d605ebadcc11b3992acb632a",
+    "logged_date": "10-15",
+    "evidence": [
+      {
+        "normalized_line": 83,
+        "text": "10-15 10:55:03.235 [INFO] [robojudo] Robot service started with config: g1_native_loco_mimic_23dof"
+      },
+      {
+        "normalized_line": 86,
+        "text": "Beyondmimic eight_cut_1: 0step [00:00, ?step/s]INFO:     127.0.0.1:33844 - \"POST /start HTTP/1.1\" 200 OK"
+      },
+      {
+        "normalized_line": 87,
+        "text": "INFO:     127.0.0.1:40828 - \"POST /enter_mimic HTTP/1.1\" 200 OK"
+      },
+      {
+        "normalized_line": 109,
+        "text": "10-15 10:55:28.645 [WARNING] [robojudo.pipeline.g1_native_loco_mimic_pipeline] G1 user control acquired; mimic policy active: {'authority_state': 'USER_ACTIVE', 'fsm_id': 1000, 'last_loco_api_result': 0, 'publish_enabled': True, 'active_publish_count': 2}"
+      },
+      {
+        "normalized_line": 3603,
+        "text": "Beyondmimic eight_cut_1: 3532.0step [01:11, 51.17step/s]INFO:     127.0.0.1:50208 - \"POST /shutdown HTTP/1.1\" 200 OK"
+      }
+    ]
+  },
+  "nov4_session": {
+    "source_basename": "robojudo-service-20261104.log",
+    "sha256": "9acf95032537824d0685c9ba765ac9c821b6f2bb4563c90ea2809dcc9622ee99",
+    "evidence": [
+      {
+        "normalized_line": 3321,
+        "text": "11-04 18:15:07.686 [INFO] [robojudo] Robot service started with config: g1_native_loco_mimic_23dof"
+      },
+      {
+        "normalized_line": 3324,
+        "text": "Beyondmimic eight_cut_1: 0step [00:00, ?step/s]INFO:     127.0.0.1:59668 - \"POST /start HTTP/1.1\" 200 OK"
+      },
+      {
+        "normalized_line": 3326,
+        "text": "INFO:     127.0.0.1:59696 - \"POST /enter_mimic HTTP/1.1\" 200 OK"
+      },
+      {
+        "normalized_line": 3426,
+        "text": "11-04 18:15:13.850 [WARNING] [robojudo.pipeline.g1_native_loco_mimic_pipeline] G1 user control acquired; mimic policy active: {'authority_state': 'USER_ACTIVE', 'fsm_id': 1000, 'last_loco_api_result': 0, 'publish_enabled': True, 'active_publish_count': 261}"
+      }
+    ],
+    "hardware_identity_caution": "Snapshot was taken from company 29DoF compute; config name alone does not prove physical DoF or log origin."
+  },
+  "scope": "HTTP service execution evidence only. No ASR transcript, wake-word event or upstream voice request correlation in these logs."
+}

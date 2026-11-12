@@ -1,0 +1,34 @@
+11-12 15:53:34.977 [DEBUG] [robojudo] ========== robojudo-1.5.0 init done ==========
+DEBUG: Looking for BeyondMimicPolicy in registry...
+[Registry][robojudo.policy] BeyondMimicPolicy, total: 1
+[Policy] Dynamic import of policy: BeyondMimicPolicy
+11-12 15:53:35.101 [INFO] [robojudo.policy.beyondmimic_policy] [BeyondMimicPolicy] Using modelmeta as config ...
+11-12 15:53:35.166 [INFO] [robojudo.policy.beyondmimic_policy] [BeyondMimicPolicy] Using modelmeta as config ...
+11-12 15:53:35.213 [INFO] [robojudo.policy.beyondmimic_policy] [BeyondMimicPolicy] Using modelmeta as config ...
+                                                                                11-12 15:53:35.215 [INFO] [robojudo.utils.rotation] base set to pos: [-0.00642378  0.01783472  0.        ], quat: [ 0.          0.         -0.69460824  0.71938821]
+{
+  "models": [
+    {
+      "index": 0,
+      "model": "cut1_scratch_v2_i15000_zero_translation",
+      "sha256": "2afc0f0cb58605b5abc7eb2c127148f9e5e0993e6dc4b54c8ff0540af155e53d",
+      "max_timestep": 8627
+    },
+    {
+      "index": 1,
+      "model": "eight_cut_2_v010_1.2x",
+      "sha256": "bbca0a34feab8f9f73f150003910190cfe9412ef91b4a00f0b65197a2a0312bc",
+      "max_timestep": 5960
+    },
+    {
+      "index": 2,
+      "model": "cut3_pitch_ref6_20261112",
+      "sha256": "47b75e8c34d8735d3bd788bfed90935e5e99d93f18f063dadcc7ac0d4966398c",
+      "max_timestep": 5299
+    }
+  ],
+  "regular_fsm_id": 500,
+  "odometry_type": "UNITREE",
+  "hardware_initialized": false
+}
+Suite contract passed; no hardware SDK, no environment, no control commands.

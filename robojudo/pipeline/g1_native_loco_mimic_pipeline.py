@@ -5,6 +5,7 @@ import time
 from enum import Enum, auto
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 import robojudo.environment
 from robojudo.controller import CtrlManager
@@ -13,6 +14,7 @@ from robojudo.pipeline import Pipeline, pipeline_registry
 from robojudo.pipeline.pipeline_cfgs import G1NativeLocoMimicPipelineCfg
 from robojudo.pipeline.rl_multi_policy_pipeline import PolicyManager
 from robojudo.utils.util_func import get_gravity_orientation
+from robojudo.tools.pose_transition import PoseReferenceTransition
 
 from robojudo.tools.mimic_safety import (
     HOLD_TEXT,
@@ -82,6 +84,9 @@ class G1NativeLocoMimicPipeline(Pipeline):
     WALKRUN_ENTRY_WAIT_S = 8.0
     WALKRUN_FSM_IDS = (801, 802)  # 802: walk-run on some (29DoF) firmware
     REGULAR_FSM_IDS = (500, 501)
+    POSE_SETTLE_TIMEOUT_S = 3.0
+    POSE_SETTLE_STILL_S = 0.3
+    POSE_STANDING_LEG_TOL = 0.20  # radians, measured vs configured standing pose
 
     def __init__(self, cfg: G1NativeLocoMimicPipelineCfg):
         super().__init__(cfg=cfg)
@@ -90,6 +95,14 @@ class G1NativeLocoMimicPipeline(Pipeline):
             robojudo.environment, self.cfg.env.env_type
         )
         self.env = env_class(cfg_env=self.cfg.env, device=self.device)
+        # Save the deployment's standing posture BEFORE model metadata overrides
+        # the environment's default pose/gains. It is not the actor action offset.
+        self._standing_pose = dict(zip(self.env.joint_names, self.env.default_pos.copy()))
+        self._pose_transition = None
+        self._pose_transition_phase = None
+        self._pose_hold_command = None
+        self._pose_settle_deadline = None
+        self._pose_settle_since = None
         required_env_methods = (
             "acquire_user_control",
             "release_to_walkrun",
@@ -134,6 +147,36 @@ class G1NativeLocoMimicPipeline(Pipeline):
     @property
     def policy(self):
         return self.policy_manager.policy
+
+    def available_policy_names(self):
+        return [str(policy.cfg_policy.policy_name) for policy in self.policy_manager.policies]
+
+    def current_policy_name(self):
+        return str(self.policy.cfg_policy.policy_name)
+
+    def select_policy(self, policy_name=None, sequence_index=None):
+        """Preserve the deployed HTTP service's exact-name / zero-based selection."""
+        if self.state != NativeLocoMimicState.NATIVE_LOCO:
+            raise ValueError("policy can only be selected in native loco state")
+        if self._walkrun_entry_deadline is not None:
+            raise ValueError("policy cannot be selected while mimic entry is pending")
+        if bool(policy_name) == (sequence_index is not None):
+            raise ValueError("specify exactly one of policy_name or sequence_index")
+        if policy_name:
+            matches = [i for i, name in enumerate(self.available_policy_names()) if name == policy_name]
+            if len(matches) != 1:
+                raise ValueError(f"loaded policy not found or ambiguous: {policy_name}")
+            index = matches[0]
+        else:
+            if isinstance(sequence_index, bool) or not isinstance(sequence_index, int):
+                raise ValueError("sequence_index must be an integer")
+            index = sequence_index
+            if not 0 <= index < self.policy_manager.num_policies:
+                raise ValueError(f"sequence_index out of range: {index}")
+        self.policy_manager.set_policy(index)
+        self.freq = self.policy.cfg_policy.freq
+        self.dt = 1.0 / self.freq
+        return index, self.current_policy_name()
 
     def self_check(self):
         self.env.self_check()
@@ -278,6 +321,11 @@ class G1NativeLocoMimicPipeline(Pipeline):
                                  after_quat_xyzw=np.asarray(env_data["base_quat"]).tolist(),
                                  yaw_rad=yaw, state_age_s=self.env.safety_state_age())
             self.env.update_dof_cfg(override_cfg=self.policy.cfg_action_dof)
+            self._pose_hold_command = None
+            self._pose_transition = None
+            self._pose_settle_deadline = None
+            if self.cfg.entry_pose_transition_s > 0:
+                self._begin_pose_transition("entry", env_data)
             observation, extras = self.policy.get_observation(env_data, ctrl_data)
             if self.mimic_guard:
                 self.mimic_guard.observation(observation)
@@ -306,6 +354,9 @@ class G1NativeLocoMimicPipeline(Pipeline):
             return None
 
         self.state = NativeLocoMimicState.MIMIC_ACTIVE
+        if self._pose_transition is not None:
+            # Acquisition can block. The full transition starts AFTER confirmed ownership.
+            self._pose_transition.started_at = time.monotonic()
         self._step_errors = 0
         self._clear_stop_flags()
         self.trace_event("native_state", state=self.state.name)
@@ -318,6 +369,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
         return extras, pd_target
 
     def _entry_failed(self, exc, text=WARNING_TEXT):
+        self._pose_transition = None
         status = self.env.get_control_status()
         if status["authority_state"] == "USER_ACTIVE" or status["publish_enabled"]:
             # The USER request may be in effect and the bridge keeps streaming
@@ -479,6 +531,12 @@ class G1NativeLocoMimicPipeline(Pipeline):
     def _begin_handback(self, reason):
         """Policy still healthy: freeze the reference so it actively holds this
         pose, and hand back while it keeps balancing."""
+        # If the operator stops during a transition, hold its current command;
+        # do not jump back to the original motion or force the remaining ramp.
+        self._pose_settle_deadline = None
+        if self._pose_transition is not None:
+            self._pose_hold_command, _ = self._pose_transition.sample(time.monotonic())
+            self._pose_transition = None
         self._stop_reason = None
         self._stop_deadline = None
         self._handback_reason = reason
@@ -545,7 +603,10 @@ class G1NativeLocoMimicPipeline(Pipeline):
         elif self._handback_reason is not None:
             self._return_to_native_loco(self._handback_reason)
         elif "[MOTION_DONE]" in extras.get("CALLBACK", []):
-            self._begin_handback("motion done")
+            if self.cfg.exit_pose_transition_s > 0:
+                self._begin_pose_transition("exit", env_data)
+            else:
+                self._begin_handback("motion done")
         elif self._stop_reason is not None:
             if self._at_stance(env_data):
                 self._begin_handback(f"{self._stop_reason}: stance reached")
@@ -572,6 +633,9 @@ class G1NativeLocoMimicPipeline(Pipeline):
         if self._regular_still_since is None or time.monotonic() - self._regular_still_since < self.REGULAR_STILL_S:
             return
         self._regular_deadline = None
+        requested_fsm_id = int(self.cfg.env.unitree.regular_fsm_id)
+        self.trace_event("regular_loco_request", requested_fsm_id=requested_fsm_id)
+        logger.warning("REGULAR_LOCO_REQUEST: requested_fsm_id=%s", requested_fsm_id)
         result = self.env.switch_walkrun_to_regular()
         status = self.env.get_control_status()
         fsm_trace = getattr(self.env, "last_regular_fsm_trace", None)
@@ -584,7 +648,8 @@ class G1NativeLocoMimicPipeline(Pipeline):
             if self.safety_speaker:
                 self.safety_speaker.announce(
                     REGULAR_SKIPPED_TEXT if status["fsm_id"] in self.WALKRUN_FSM_IDS else REGULAR_FAILED_TEXT)
-        self.trace_event("regular_loco", result=result, fsm_id=status["fsm_id"], fsm_trace=fsm_trace)
+        self.trace_event("regular_loco", result=result, requested_fsm_id=requested_fsm_id,
+                         fsm_id=status["fsm_id"], fsm_trace=fsm_trace)
 
     def _shutdown(self):
         result = self.close()
@@ -702,6 +767,10 @@ class G1NativeLocoMimicPipeline(Pipeline):
 
     def _step_mimic(self, env_data, ctrl_data):
         # Runtime observations and outputs are assumed valid per deployment scope.
+        hold = getattr(self, "_pose_hold_command", None)
+        if hold is not None:
+            raw = getattr(self.policy, "__dict__", {}).get("policy", self.policy)
+            raw.command = {k: np.asarray(v).copy() for k, v in hold.items()}
         observation, extras = self.policy.get_observation(env_data, ctrl_data)
         # Match the exact integer time_step sent to ONNX, before the callback advances it.
         query_frame = int(self.policy.timestep)
@@ -709,6 +778,90 @@ class G1NativeLocoMimicPipeline(Pipeline):
         pd_target = self._apply_fixed_hip_bias(pd_target, query_frame)
         self.send_traced(pd_target, extras.get("hand_pose", None), commands=ctrl_data.get("COMMANDS", []))
         return extras, pd_target
+
+    def _begin_pose_transition(self, phase, env_data):
+        raw = getattr(self.policy, "__dict__", {}).get("policy", self.policy)
+        names = list(self.policy.cfg_action_dof.joint_names)
+        anchor = raw.motion_anchor_body_index
+        command = raw.command
+        goal_anchor = np.asarray(command["body_quat_w"][anchor]).copy()
+        if phase == "entry":
+            indices = [list(self.env.joint_names).index(n) for n in names]
+            start_q = np.asarray(env_data["dof_pos"])[indices]
+            goal_q = command["joint_pos"]
+            # env torso orientation is already in the reset heading frame;
+            # convert back to the ONNX command's world frame before interpolation.
+            start_anchor = (raw.command_init_align.R_base *
+                            Rotation.from_quat(env_data["torso_quat"])).as_quat()[[3, 0, 1, 2]]
+            duration = self.cfg.entry_pose_transition_s
+        else:
+            start_q = command["joint_pos"]
+            goal_q = np.asarray([self._standing_pose[n] for n in names])
+            start_anchor = goal_anchor.copy()
+            # Stand at the CURRENT base heading, not the last reference torso
+            # yaw (which may contain a waist twist and request an unwanted turn).
+            yaw = Rotation.from_quat(env_data["base_quat"]).as_euler("xyz")[2]
+            goal_anchor = (raw.command_init_align.R_base *
+                           Rotation.from_euler("z", yaw)).as_quat()[[3, 0, 1, 2]]
+            duration = self.cfg.exit_pose_transition_s
+        self._pose_hold_command = None
+        self._pose_transition = PoseReferenceTransition(
+            command, start_q, goal_q, start_anchor, goal_anchor, anchor,
+            duration, time.monotonic())
+        self._pose_transition_phase = phase
+        raw.command, _ = self._pose_transition.sample(self._pose_transition.started_at)
+        self.trace_event("pose_transition", phase=phase, event="begin", duration_s=duration,
+                         reference_frame=int(raw.timestep), joint_names=names,
+                         start_q=np.asarray(start_q).tolist(), goal_q=np.asarray(goal_q).tolist())
+        logger.warning("POSE_TRANSITION: %s %.3fs, motion frame held at %s",
+                       phase, duration, raw.timestep)
+
+    def _step_pose_transition(self, env_data, ctrl_data):
+        command, done = self._pose_transition.sample(time.monotonic())
+        raw = getattr(self.policy, "__dict__", {}).get("policy", self.policy)
+        raw.command = command
+        observation, extras = self.policy.get_observation(env_data, ctrl_data)
+        target = self.policy.get_pd_target(observation)
+        self.send_traced(target, extras.get("hand_pose"),
+                         phase=f"{self._pose_transition_phase}_pose_transition",
+                         commands=ctrl_data.get("COMMANDS", []))
+        if done:
+            phase = self._pose_transition_phase
+            self._pose_transition = None
+            self.trace_event("pose_transition", phase=phase, event="complete",
+                             reference_frame=int(raw.timestep))
+            if phase == "exit":
+                self._pose_hold_command = {k: np.asarray(v).copy() for k, v in command.items()}
+                self._pose_settle_deadline = time.monotonic() + self.POSE_SETTLE_TIMEOUT_S
+                self._pose_settle_since = None
+        return extras, target
+
+    def _step_pose_settle(self, env_data, ctrl_data):
+        extras, target = self._step_mimic(env_data, ctrl_data)
+        legs = [i for i, n in enumerate(self.env.joint_names)
+                if any(k in n for k in self.STANCE_JOINT_KEYS)]
+        goal = np.asarray([self._standing_pose[n] for n in self.env.joint_names])
+        error = float(np.max(np.abs(np.asarray(env_data["dof_pos"])[legs] - goal[legs])))
+        speed = float(np.max(np.abs(np.asarray(env_data["dof_vel"])[legs])))
+        roll, pitch, _ = Rotation.from_quat(env_data["base_quat"]).as_euler("xyz")
+        now = time.monotonic()
+        ready = (error <= self.POSE_STANDING_LEG_TOL and speed <= self.REGULAR_STILL_VEL
+                 and abs(roll) <= .15 and abs(pitch) <= .15)
+        self._pose_settle_since = ((now if self._pose_settle_since is None else self._pose_settle_since)
+                                   if ready else None)
+        measured = dict(max_leg_error_deg=float(np.rad2deg(error)), max_leg_speed_rad_s=speed,
+                        roll_deg=float(np.rad2deg(roll)), pitch_deg=float(np.rad2deg(pitch)))
+        if self._pose_settle_since is not None and now-self._pose_settle_since >= self.POSE_SETTLE_STILL_S:
+            self.trace_event("pose_transition", phase="exit", event="measured_stance_confirmed", **measured)
+            self._begin_handback("motion done: measured standing pose confirmed")
+        elif now >= self._pose_settle_deadline:
+            self._pose_settle_deadline = None
+            self.trace_event("pose_transition", phase="exit", event="stance_not_confirmed", **measured)
+            # A finished interpolation is not proof of a finished physical motion.
+            # Keep the balancing actor active; no damp, no forced mode request.
+            self._enter_hold("standing pose not confirmed after transition",
+                             text="站姿恢复未完成，已保持当前姿态，请用遥控器接管")
+        return extras, target
 
     def step(self, dry_run: bool = False):
         if dry_run or self.state in (NativeLocoMimicState.CLOSED, NativeLocoMimicState.FAULT):
@@ -760,15 +913,23 @@ class G1NativeLocoMimicPipeline(Pipeline):
             self.ctrl_manager.post_step_callback(ctrl_data)
             return
 
+        transition_step = (getattr(self, "_pose_transition", None) is not None
+                           or getattr(self, "_pose_settle_deadline", None) is not None)
         if initial_mimic_step is not None:
             extras, pd_target = initial_mimic_step
+        elif getattr(self, "_pose_settle_deadline", None) is not None:
+            extras, pd_target = self._step_pose_settle(env_data, ctrl_data)
+        elif transition_step:
+            extras, pd_target = self._step_pose_transition(env_data, ctrl_data)
         else:
             extras, pd_target = self._step_mimic(env_data, ctrl_data)
         self._step_errors = 0
 
-        self.policy.post_step_callback(commands)
+        if not transition_step:
+            self.policy.post_step_callback(commands)
         self.ctrl_manager.post_step_callback(ctrl_data)
-        self._advance_stop(env_data, extras)
+        if not transition_step:
+            self._advance_stop(env_data, extras)
 
         if self.cfg.debug.log_obs:
             self.debug_logger.log(

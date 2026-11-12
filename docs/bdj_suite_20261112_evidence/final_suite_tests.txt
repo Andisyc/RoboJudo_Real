@@ -1,0 +1,1 @@
+Final suite tests are included in regression.txt: 10 suite cases, 72 total cases and 41 subtests.

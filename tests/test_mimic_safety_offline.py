@@ -138,9 +138,15 @@ def make(yaw=0, policy_cls=Policy, names=None):
     p=P.__new__(P);p.env=Env(yaw,names);p.env.joint_names=p.env.names;policy=policy_cls(p.env)
     if isinstance(policy,StancePolicy):policy=Wrapper(policy,p.env.names)
     p.policy_manager=NS(policy=policy)
+    if not hasattr(policy, 'cfg_policy'):policy.cfg_policy=NS(start_timestep=0,max_timestep=100)
+    policy.cfg_policy.policy_name='offline_test'
+    if not hasattr(policy, 'timestep'):policy.timestep=0
     p.state=State.NATIVE_LOCO;p.should_stop=False;p.events=[];p.mimic_guard=Guard(p.env.names)
     p.announcements=[];p.safety_speaker=NS(announce=lambda:p.announcements.append(safety.WARNING_TEXT),finish=lambda:None)
     p._entry_blocked=False;p.do_safety_check=True;p.timestep=0;p.cfg=NS(debug=NS(log_obs=False),return_to_regular_loco=True,walkrun_on_start=True)
+    p.cfg.fixed_hip_bias=NS(enabled=False,policy_name='disabled',model_dump=lambda:dict(enabled=False))
+    p.cfg.entry_pose_transition_s=0.;p.cfg.exit_pose_transition_s=0.;p.cfg.env=NS(unitree=NS(regular_fsm_id=500))
+    p._pose_transition=None;p._pose_hold_command=None
     p._step_errors=0;p._handback_next_try=0.;p._regular_deadline=None;p._regular_still_since=None
     p._walkrun_entry_deadline=None;p._walkrun_still_since=None
     p._stance_cache={};p._clear_stop_flags()

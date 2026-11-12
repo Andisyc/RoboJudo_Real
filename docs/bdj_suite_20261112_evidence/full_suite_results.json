@@ -1,0 +1,245 @@
+{
+  "suite_f1.3": {
+    "motion_completed": true,
+    "stance_not_confirmed": false,
+    "segment_transition_s": 3.0,
+    "model": "cut3_pitch_ref6_20261112",
+    "entry_ramp_s": 3.0,
+    "exit_ramp_s": 0.0,
+    "friction": 1.3,
+    "completed": true,
+    "seconds": 408.13199999726083,
+    "last_frame": 5299,
+    "min_height": 0.648975371121152,
+    "windows": {
+      "entry": {
+        "pitch_peak_deg": 1.2588678772394442,
+        "roll_abs_peak_deg": 1.3628242853966432,
+        "foot_xy_range_m": [
+          [
+            0.008457403046587292,
+            0.03116798534649262
+          ],
+          [
+            0.0031059620692928166,
+            0.03194202335806698
+          ]
+        ],
+        "no_ground_fraction": 0.0033333333333333335
+      },
+      "lean1": {
+        "pitch_peak_deg": 18.77459143452218,
+        "roll_abs_peak_deg": 10.569667211644187,
+        "foot_xy_range_m": [
+          [
+            0.003404149509927623,
+            0.012369954242587966
+          ],
+          [
+            0.010448152046539117,
+            0.01014944155908698
+          ]
+        ],
+        "no_ground_fraction": 0.0
+      },
+      "lean2": {
+        "pitch_peak_deg": 18.65422751877967,
+        "roll_abs_peak_deg": 10.498847921340728,
+        "foot_xy_range_m": [
+          [
+            0.0022321775982237085,
+            0.011837300534851158
+          ],
+          [
+            0.009665820899304496,
+            0.008159603828078621
+          ]
+        ],
+        "no_ground_fraction": 0.0
+      }
+    },
+    "handoff_measured_standing_max_leg_error_deg": 17.568322161352423
+  },
+  "suite_first": {
+    "motion_completed": true,
+    "stance_not_confirmed": false,
+    "model": "cut3_pitch_ref6_20261112",
+    "entry_ramp_s": 3.0,
+    "exit_ramp_s": 0.0,
+    "friction": 1.0,
+    "completed": true,
+    "seconds": 408.13199999726083,
+    "last_frame": 5299,
+    "min_height": 0.6482255009272043,
+    "windows": {
+      "entry": {
+        "pitch_peak_deg": 1.263682959752186,
+        "roll_abs_peak_deg": 1.3566918843494873,
+        "foot_xy_range_m": [
+          [
+            0.008765098491162672,
+            0.03220375107345569
+          ],
+          [
+            0.0029622697224501284,
+            0.03097753153824656
+          ]
+        ],
+        "no_ground_fraction": 0.0033333333333333335
+      },
+      "lean1": {
+        "pitch_peak_deg": 18.114972044659144,
+        "roll_abs_peak_deg": 10.46286650395404,
+        "foot_xy_range_m": [
+          [
+            0.0029553464954905767,
+            0.013525409588990567
+          ],
+          [
+            0.008928909044041318,
+            0.007973596698615026
+          ]
+        ],
+        "no_ground_fraction": 0.0
+      },
+      "lean2": {
+        "pitch_peak_deg": 18.12803852894929,
+        "roll_abs_peak_deg": 10.46655307202231,
+        "foot_xy_range_m": [
+          [
+            0.0018596059869886994,
+            0.011746124042966044
+          ],
+          [
+            0.007949189228475484,
+            0.006505300796952274
+          ]
+        ],
+        "no_ground_fraction": 0.0
+      }
+    },
+    "handoff_measured_standing_max_leg_error_deg": 17.270845691194427
+  },
+  "suite_f.65": {
+    "motion_completed": true,
+    "stance_not_confirmed": false,
+    "segment_transition_s": 3.0,
+    "model": "cut3_pitch_ref6_20261112",
+    "entry_ramp_s": 3.0,
+    "exit_ramp_s": 0.0,
+    "friction": 0.65,
+    "completed": true,
+    "seconds": 408.13199999726083,
+    "last_frame": 5299,
+    "min_height": 0.6462461037632369,
+    "windows": {
+      "entry": {
+        "pitch_peak_deg": 1.2616622880037731,
+        "roll_abs_peak_deg": 1.3831587358188542,
+        "foot_xy_range_m": [
+          [
+            0.007236271361170888,
+            0.03506702923644975
+          ],
+          [
+            0.0022339126029813656,
+            0.03215460702144829
+          ]
+        ],
+        "no_ground_fraction": 0.0033333333333333335
+      },
+      "lean1": {
+        "pitch_peak_deg": 17.937612876129474,
+        "roll_abs_peak_deg": 10.408552273608787,
+        "foot_xy_range_m": [
+          [
+            0.0016760827414089574,
+            0.016966261284859785
+          ],
+          [
+            0.009336257762627621,
+            0.008552751584252394
+          ]
+        ],
+        "no_ground_fraction": 0.0
+      },
+      "lean2": {
+        "pitch_peak_deg": 17.257708839306122,
+        "roll_abs_peak_deg": 10.478236031936829,
+        "foot_xy_range_m": [
+          [
+            0.0018635523577311824,
+            0.014954510947113808
+          ],
+          [
+            0.008257501423292679,
+            0.006981674278731864
+          ]
+        ],
+        "no_ground_fraction": 0.0
+      }
+    },
+    "handoff_measured_standing_max_leg_error_deg": 17.739253206186408
+  },
+  "suite_ref4": {
+    "motion_completed": true,
+    "stance_not_confirmed": false,
+    "segment_transition_s": 3.0,
+    "model": "cut3_pitch_ref4_20261112",
+    "entry_ramp_s": 3.0,
+    "exit_ramp_s": 0.0,
+    "friction": 1.0,
+    "completed": true,
+    "seconds": 408.13199999726083,
+    "last_frame": 5299,
+    "min_height": 0.6490778965847562,
+    "windows": {
+      "entry": {
+        "pitch_peak_deg": 1.263682959752186,
+        "roll_abs_peak_deg": 1.3566918843494873,
+        "foot_xy_range_m": [
+          [
+            0.008765098491162672,
+            0.03220375107345569
+          ],
+          [
+            0.0029622697224501284,
+            0.03097753153824656
+          ]
+        ],
+        "no_ground_fraction": 0.0033333333333333335
+      },
+      "lean1": {
+        "pitch_peak_deg": 19.289036227936677,
+        "roll_abs_peak_deg": 10.442737621466957,
+        "foot_xy_range_m": [
+          [
+            0.0032494252538393387,
+            0.015031757525585276
+          ],
+          [
+            0.010859395951812272,
+            0.00964112574741205
+          ]
+        ],
+        "no_ground_fraction": 0.0
+      },
+      "lean2": {
+        "pitch_peak_deg": 19.19528824957242,
+        "roll_abs_peak_deg": 10.466175560440146,
+        "foot_xy_range_m": [
+          [
+            0.002288572439000422,
+            0.013500845351804625
+          ],
+          [
+            0.009304971474191567,
+            0.0073649260774613645
+          ]
+        ],
+        "no_ground_fraction": 0.0
+      }
+    },
+    "handoff_measured_standing_max_leg_error_deg": 17.292280460522015
+  }
+}

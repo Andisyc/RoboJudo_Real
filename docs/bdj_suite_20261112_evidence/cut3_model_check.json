@@ -1,0 +1,25 @@
+{
+  "degrees": 6,
+  "windows": [
+    [
+      2200,
+      2300,
+      2400,
+      2500
+    ],
+    [
+      3550,
+      3630,
+      3730,
+      3850
+    ]
+  ],
+  "actor_weights_unchanged": true,
+  "upper_joint_reference_unchanged": true,
+  "reference_exact_outside_windows_plus_one_frame": true,
+  "max_foot_error_mm": 0.00034029316483245815,
+  "max_foot_rotation_error_deg": 0.00027579840601241456,
+  "max_leg_change_deg": 4.746277809143066,
+  "sha256": "47b75e8c34d8735d3bd788bfed90935e5e99d93f18f063dadcc7ac0d4966398c",
+  "baseline_sha256": "56ca0a2179c7cab9a654db59873f767dd5643d3f1de185f6298d8207799beebe"
+}

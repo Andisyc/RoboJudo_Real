@@ -133,3 +133,54 @@ class g1_native_loco_mimic_23dof_backpack(G1NativeLocoMimicPipelineCfg):
         ),
     ]
     do_safety_check: bool = True
+
+
+@cfg_registry.register
+class g1_native_loco_mimic_23dof_backpack_cut3_recovery(g1_native_loco_mimic_23dof_backpack):
+    """Offline-tested Cut3 recovery candidate; preserves the original model list."""
+
+    mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = [
+        G1BeyondMimic23DoFPolicyCfg(
+            policy_name="cut3_recovery_r1_i80",
+            without_state_estimator=False,
+            max_timestep=5299,
+        ),
+    ]
+
+
+@cfg_registry.register
+class g1_native_loco_mimic_23dof_backpack_cut3_fsm500(g1_native_loco_mimic_23dof_backpack_cut3_recovery):
+    """Isolate the 23DoF FSM request change; original recovery ONNX and no ramps."""
+
+    env: G1LocoEnvCfg = g1_native_loco_mimic_23dof_backpack.model_fields["env"].default.model_copy(deep=True)
+    env.unitree.regular_fsm_id = 500
+
+
+@cfg_registry.register
+class g1_native_loco_mimic_23dof_backpack_cut3_pitch(g1_native_loco_mimic_23dof_backpack_cut3_fsm500):
+    """Reference-only pitch candidate; preserves entry/exit control behavior."""
+    mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = [
+        G1BeyondMimic23DoFPolicyCfg(
+            policy_name="cut3_pitch_ref4_20261112",
+            without_state_estimator=False,
+            max_timestep=5299,
+        ),
+    ]
+
+
+@cfg_registry.register
+class g1_native_loco_mimic_23dof_backpack_cut3_entry_transition(g1_native_loco_mimic_23dof_backpack_cut3_pitch):
+    """Separate startup test: 3s reference transition, original ending handback."""
+
+    entry_pose_transition_s: float = 3.0
+
+
+@cfg_registry.register
+class g1_native_loco_mimic_23dof_backpack_cut3_transition(g1_native_loco_mimic_23dof_backpack_cut3_pitch):
+    """EXPERIMENTAL / OFFLINE ONLY: final standing tracking has not passed acceptance.
+
+    Do not select this entry for the first hardware test. Use cut3_pitch instead.
+    """
+
+    entry_pose_transition_s: float = 3.0
+    exit_pose_transition_s: float = 3.0

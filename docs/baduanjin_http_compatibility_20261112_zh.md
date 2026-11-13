@@ -31,7 +31,7 @@
 |---|---|---|
 | 查询当前状态 | `GET /status` | 是否已加载；不能同时开第二个 controller |
 | 尚未加载时准备联播 | `POST /start`，JSON `{"config_name":"g1_baduanjin_23dof_suite"}` | `/status.config_name` 确认是新联播配置 |
-| 查询可选模型 | `GET /policies` | 顺序为cut1 原发布模型、原 cut2 v010、cut3_jointv1_pitch8_rightless_20261112 |
+| 查询可选模型 | `GET /policies` | 顺序为cut1_leftsmall_i80_20261112、原 cut2 v010、cut3_jointv1_pitch8_rightless_20261112 |
 | 每次触发完整演出（含重复播放） | `POST /enter_mimic`，不带请求体 | 自动从 cut1 首帧开始；确认实际进入 `MIMIC_ACTIVE` / USER_ACTIVE / FSM 1000 |
 | 等待全部结束 | `GET /status`，读取日志事件 | 最后从走跑进入常规 500、发布关闭；不能只看 state=NATIVE_LOCO |
 

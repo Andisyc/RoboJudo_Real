@@ -16,7 +16,7 @@ class g1_baduanjin_23dof_suite(G1BaduanjinSuitePipelineCfg):
     exit_pose_transition_s: float = 0.
     segment_transition_s: float = 3.
     mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = [
-        G1BeyondMimic23DoFPolicyCfg(policy_name='cut1_scratch_v2_i15000_zero_translation',without_state_estimator=False,max_timestep=8627),
+        G1BeyondMimic23DoFPolicyCfg(policy_name='cut1_leftsmall_i80_20261112',without_state_estimator=False,max_timestep=8627),
         G1BeyondMimic23DoFPolicyCfg(policy_name='eight_cut_2_v010_1.2x',without_state_estimator=False,max_timestep=5960),
         G1BeyondMimic23DoFPolicyCfg(policy_name='cut3_jointv1_pitch8_rightless_20261112',without_state_estimator=False,max_timestep=5299),
     ]

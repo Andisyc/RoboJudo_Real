@@ -42,6 +42,10 @@ def parse_args():
         "--key-speed", nargs="+", action="extend", metavar="KEY=SPEED",
         help="Local FADA keyboard: override W/S/A/D/Q/E magnitudes independently (m/s or rad/s)",
     )
+    parser.add_argument(
+        "--hardware-forward-speed-limit", type=float, metavar="M/S",
+        help="Local G1 hardware baseline: set the maximum positive VX without changing W's speed",
+    )
     
     args = parser.parse_args()
     if args.preset_command is not None:
@@ -66,13 +70,17 @@ def parse_args():
 
 
 def _apply_keyboard_options(cfg: RlPipelineCfg, args) -> None:
-    if not (args.keyboard_hold or args.preset_command is not None or args.key_speed):
+    keyboard_requested = args.keyboard_hold or args.preset_command is not None or args.key_speed
+    forward_limit = args.hardware_forward_speed_limit
+    if not keyboard_requested and forward_limit is None:
         return
     simulation = cfg.env.env_type == "MujocoEnv" and cfg.env.is_sim
     hardware = (
         args.config == "g1_real_fada_baseline" and cfg.robot == "g1"
         and cfg.env.env_type == "UnitreeCppEnv" and not cfg.env.is_sim
     )
+    if forward_limit is not None and (not hardware or not keyboard_requested):
+        raise ValueError("--hardware-forward-speed-limit requires the local g1_real_fada_baseline and a keyboard option")
     if not (simulation or hardware) or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter":
         raise ValueError("Keyboard options require FADA MuJoCo or the local g1_real_fada_baseline profile")
     if len(cfg.ctrl) != 1 or not isinstance(cfg.ctrl[0], KeyboardCtrlCfg):
@@ -89,6 +97,8 @@ def _apply_keyboard_options(cfg: RlPipelineCfg, args) -> None:
                 or os.environ.get("XDG_SESSION_TYPE") == "wayland"):
             raise ValueError("Hardware keyboard options require a local X11 desktop; do not unset DISPLAY or use SSH")
         overrides["keyboard_command_mode"] = "hardware_hold"
+        if forward_limit is not None:
+            overrides["hardware_forward_speed_limit"] = forward_limit
     elif args.keyboard_hold:
         overrides["keyboard_command_mode"] = "hold"
     if overrides:

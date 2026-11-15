@@ -848,9 +848,13 @@ dedicated desktop and do not type in other applications while control is active.
 Zero velocity is not a physical emergency stop.
 
 Any of the three options selects this desktop hold mode on the hardware baseline.
-All overrides and preset components are bounded by the baseline's configured
-axis magnitudes (0.4 m/s forward/back and lateral, 0.8 rad/s yaw). Without these
-options, the existing baseline input mode is unchanged.
+Without these options, the existing baseline input mode is unchanged. The
+default forward command limit is 0.4 m/s. To explicitly allow a 0.5 m/s forward
+preset without changing W's default speed, add
+`--hardware-forward-speed-limit 0.5 --preset-command 0.5`.
+The limit also applies to W overrides and does not change the reverse or lateral
+limits (0.4 m/s) or the yaw limit (0.8 rad/s). It is a software command limit,
+not a certification of hardware capability.
 
 ### Pause or freeze online LoRA updates
 

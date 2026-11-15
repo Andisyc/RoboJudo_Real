@@ -73,6 +73,7 @@ class G1FADAPlannerIDMPolicyCfg(G1UniLabPolicyCfg):
     keyboard_speed_overrides: dict[Literal["w", "s", "a", "d", "q", "e"], _KeyboardSpeed] = Field(default_factory=dict)
     keyboard_command_mode: Literal["latch", "hold", "hardware_hold"] = "latch"
     preset_velocity_command: tuple[_VelocityComponent, _VelocityComponent, _VelocityComponent] | None = None
+    hardware_forward_speed_limit: Annotated[FiniteFloat, Field(gt=0.0, le=_FLOAT32_MAX)] | None = None
     # v022 inherits the FADA distill MuJoCo control contract, which maps raw
     # action chunks directly to joint-position offsets.
     execution_action_scale: float = 1.0
@@ -85,16 +86,25 @@ class G1FADAPlannerIDMPolicyCfg(G1UniLabPolicyCfg):
     @model_validator(mode="after")
     def _validate_hardware_keyboard_speeds(self):
         if self.keyboard_command_mode != "hardware_hold":
+            if self.hardware_forward_speed_limit is not None:
+                raise ValueError("hardware_forward_speed_limit requires hardware keyboard mode")
             return self
         limits = self.keyboard_command_magnitudes
         if len(limits) != 3 or not all(0 < limit <= _FLOAT32_MAX for limit in limits):
             raise ValueError("Hardware keyboard requires three finite positive baseline magnitudes")
+        forward_limit = self.hardware_forward_speed_limit
+        if forward_limit is None:
+            forward_limit = limits[0]
         for axis, pair in enumerate(("ws", "ad", "qe")):
             for key in pair:
-                if self.keyboard_speed_overrides.get(key, 0.0) > limits[axis]:
-                    raise ValueError(f"--key-speed {key} exceeds the baseline limit {limits[axis]:g}")
-            if self.preset_velocity_command is not None and abs(self.preset_velocity_command[axis]) > limits[axis]:
-                raise ValueError(f"--preset-command {('VX', 'VY', 'YAW')[axis]} exceeds the baseline limit {limits[axis]:g}")
+                limit = forward_limit if key == "w" else limits[axis]
+                if self.keyboard_speed_overrides.get(key, limits[axis]) > limit:
+                    raise ValueError(f"Effective {key.upper()} speed exceeds the configured limit {limit:g}")
+        if self.preset_velocity_command is not None:
+            for axis, speed in enumerate(self.preset_velocity_command):
+                limit = forward_limit if axis == 0 and speed > 0.0 else limits[axis]
+                if abs(speed) > limit:
+                    raise ValueError(f"--preset-command {('VX', 'VY', 'YAW')[axis]} exceeds the configured limit {limit:g}")
         return self
 
     @property

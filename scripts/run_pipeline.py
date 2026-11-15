@@ -30,21 +30,13 @@ def parse_args():
         # RlLocoMimicPipeline: g1_locomimic_beyondmimic | g1_locomimic_asap | g1_real_loco_mimic
         help="Name of the config class to use",)
     parser.add_argument(
-        "--left-shoulder-load", action="store_true",
-        help="G1 FADA MuJoCo only: attach 3kg at the left shoulder after forward motion starts.",
-    )
-    parser.add_argument(
-        "--left-shoulder-load-delay-s", type=float, default=None,
-        help="Simulation seconds after the first forward command before loading (default: 30; 0: immediate).",
-    )
-    parser.add_argument(
         "--keyboard-hold", action="store_true",
         help="FADA MuJoCo or local G1 hardware baseline: release motion keys to zero their axes",
     )
     parser.add_argument("--freeze-lora", action="store_true", help="Start with current LoRA frozen; F freezes and R unfreezes during execution")
     parser.add_argument(
-        "--preset-command", nargs=3, type=float, metavar=("VX", "VY", "YAW"),
-        help="Local FADA desktop: P starts this keyboard preset (m/s, m/s, rad/s); X cancels",
+        "--preset-command", nargs="+", type=float, metavar="VELOCITY",
+        help="P preset: VX (m/s) alone or VX VY YAW (m/s, m/s, rad/s); X cancels",
     )
     parser.add_argument(
         "--key-speed", nargs="+", action="extend", metavar="KEY=SPEED",
@@ -52,8 +44,11 @@ def parse_args():
     )
     
     args = parser.parse_args()
-    if args.left_shoulder_load_delay_s is not None and not args.left_shoulder_load:
-        parser.error("--left-shoulder-load-delay-s requires --left-shoulder-load")
+    if args.preset_command is not None:
+        if len(args.preset_command) == 1:
+            args.preset_command += [0.0, 0.0]
+        elif len(args.preset_command) != 3:
+            parser.error("--preset-command expects VX alone or VX VY YAW")
     overrides = {}
     for entry in args.key_speed or ():
         key, _, speed = entry.partition("=")
@@ -118,14 +113,6 @@ def main():
             raise ValueError("--freeze-lora requires a FADA Planner-IDM policy")
         cfg.policy.online_adaptation.freeze_lora = True
     _apply_keyboard_options(cfg, args)
-    if args.left_shoulder_load:
-        if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
-                or cfg.robot != "g1" or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):
-            raise ValueError("--left-shoulder-load requires G1 FADA MuJoCo simulation")
-        overrides: dict[str, bool | float] = {"left_shoulder_load": True}
-        if args.left_shoulder_load_delay_s is not None:
-            overrides["left_shoulder_load_delay_s"] = args.left_shoulder_load_delay_s
-        cfg.env = type(cfg.env).model_validate({**cfg.env.model_dump(), **overrides})
 
     # pipeline_type locate at pipeline_cfgs.py
     pipeline_type = cfg.pipeline_type

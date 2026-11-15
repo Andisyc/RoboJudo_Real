@@ -669,14 +669,10 @@ uses terminal `w` at 0.4m/s and paced asynchronous control. The corresponding
 `g1_real_fada_expert_online` profile uses the same policy and learning settings:
 
 ```bash
-uv run python scripts/run_pipeline.py \
-  -c g1_fada_expert_online_async \
-  --left-shoulder-load \
-  --left-shoulder-load-delay-s 0
+uv run python scripts/run_pipeline.py -c g1_fada_expert_online_async
 ```
 
-The load is optional. Zero delay attaches 3kg on the first positive forward
-command, not at program startup; set `30` for the delayed-load comparison.
+Payload experiments use the MuJoCo environment configuration, not launcher flags.
 Expert collection starts at the first nonzero velocity command. It retains the
 40-control-step warmup, latest ten-sample window, ten-step submission checks,
 frozen base IDM, deployment anchor and Adam state. No synchronous expert mode or
@@ -702,26 +698,14 @@ work, renewed learning and shutdown. This does not verify physical DDS/IMU I/O,
 terminal device input, target-device deadlines or robot stability.
 
 
-Add `--left-shoulder-load` for the legacy TTT comparison: walk at 0.4m/s with
-online learning for 30 simulation seconds before attaching the 3kg payload:
-
-```bash
-python scripts/run_pipeline.py \
-  -c g1_fada_online \
-  --left-shoulder-load
-```
-
-The option defaults off and also works with `g1_fada_baseline` for comparisons.
-The first positive forward velocity command (`w`) starts the delay, not program
-startup. Standing before `w` does not consume it. The delay uses completed physics
-control steps, so synchronous learner waits do not consume it either.
-`--left-shoulder-load-delay-s 0` retains immediate loading; any finite nonnegative
-delay can be supplied with `--left-shoulder-load`. Real-robot speeds are unchanged.
+In a dedicated MuJoCo experiment config, set `left_shoulder_load=True` to enable
+the 3 kg attachment. `left_shoulder_load_delay_s` defaults to 30 simulation
+seconds; zero attaches on the first positive forward command. Standing before
+that command and time spent waiting for the learner do not advance the delay.
 Repeated `w` neither restarts the delay nor stacks mass. `x` clears velocity but
 does not cancel an armed attachment or detach the load. Reset/reborn restores the
 nominal inertial properties and rearms the full delay for the next `w`, including
-when reset happens before attachment. Both options are rejected for real hardware
-before any pipeline/controller starts.
+when reset happens before attachment. This configuration is MuJoCo-only.
 
 The load is rigidly combined with `torso_link` at body-local position
 `[0.004, 0.22, 0.15]`m, matching the TTT left-shoulder setup. It updates mass,
@@ -826,8 +810,7 @@ When operating directly at the server's graphical desktop, add `--keyboard-hold`
 to the existing FADA MuJoCo command. It selects native `pynput` press/release
 events and held-key command mapping, without Mac networking:
 ```bash
-python scripts/run_pipeline.py -c g1_fada_online --keyboard-hold \
-  --left-shoulder-load --left-shoulder-load-delay-s 30
+python scripts/run_pipeline.py -c g1_fada_online --keyboard-hold
 ```
 Hold W/S, A/D or Q/E to command their axes; release a key to cancel its axis.
 X zeros all axes and inhibits held keys until they have been released; opposite
@@ -838,8 +821,8 @@ latch behavior in simulation. Motion-command zero does not guarantee instantaneo
 Local hold and legacy profiles do not require the standalone `robojudo_keyboard`
 package. Only the opt-in remote controller and remote CLI depend on that package.
 
-In the same local MuJoCo profiles, set `--preset-command VX VY YAW` to configure
-a fixed velocity in m/s, m/s and rad/s. Press P to start and X to cancel and zero
+Set `--preset-command VX` for forward-only motion, or `--preset-command VX VY YAW`
+to specify all axes (m/s, m/s, rad/s). Press P to start and X to cancel and zero
 all axes. Direction keys cannot override the preset. After X, release P and any
 held direction keys before pressing again. The preset does not require
 `--keyboard-hold`; that flag still controls how manual movement behaves.
@@ -855,7 +838,7 @@ From the server's local X11 desktop (not SSH), keep `DISPLAY` set and run:
 
 ```bash
 ./start.sh -c g1_real_fada_baseline \
-  --keyboard-hold --key-speed w=0.3 q=0.3 --preset-command 0.3 0 0.3
+  --keyboard-hold --key-speed w=0.3 q=0.3 --preset-command 0.3
 ```
 
 Wait for `prepare_done` before using the motion keys. W/S/A/D/Q/E use press and

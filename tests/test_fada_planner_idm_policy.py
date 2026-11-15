@@ -1853,6 +1853,12 @@ class TestFADADeploymentIntegration(unittest.TestCase):
                 cfg.env.forward_kinematic = None
                 if cfg.env.is_sim:
                     cfg.env.visualize_extras = False
+                if payload:
+                    cfg.env = type(cfg.env).model_validate({
+                        **cfg.env.model_dump(),
+                        "left_shoulder_load": True,
+                        "left_shoulder_load_delay_s": 0.0,
+                    })
                 cfg.policy.checkpoint_path = str(checkpoint)
                 return cfg
 
@@ -2093,8 +2099,6 @@ class TestFADADeploymentIntegration(unittest.TestCase):
                                     self.observe_patch.stop()
 
                     argv = [str(path), "-c", profile]
-                    if payload:
-                        argv.extend(["--left-shoulder-load", "--left-shoulder-load-delay-s", "0"])
                     try:
                         with patch.object(ConfigManager, "get_cfg", offline_cfg), \
                                 patch.dict(pipelines.__dict__, {"RlPipeline": SmokePipeline}), \

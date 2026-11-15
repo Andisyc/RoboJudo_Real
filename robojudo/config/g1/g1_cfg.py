@@ -182,8 +182,8 @@ def _fada_comparison_policy(
     method: str, *, execution_mode: str = "async", forward_speed: float = 0.6,
 ) -> G1FADAPlannerIDMPolicyCfg:
     return G1FADAPlannerIDMPolicyCfg(
-        policy_name="plaidm_v024_close_some_dr",
-        checkpoint_filename="planner_idm_close_some_dr_v001.pt",
+        policy_name="planner_idm_mixup_uni", # planner_idm_mixup_uni | plaidm_v024_close_some_dr
+        checkpoint_filename="student_iter_0031.pt", # student_iter_0031.pt | planner_idm_close_some_dr_v001.pt
         gait_phase_enabled=True,
         keyboard_command_magnitudes=[forward_speed, 0.4, 0.8],
         online_adaptation=FADAOnlineAdaptationCfg(

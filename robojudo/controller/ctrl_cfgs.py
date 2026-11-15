@@ -26,6 +26,7 @@ class KeyboardCtrlCfg(CtrlCfg):
         "Key.esc": "[SHUTDOWN]",
         "f": "[LORA_FREEZE]",
         "r": "[LORA_UNFREEZE]",
+        "z": "[LORA_RESTART]",
         # "Key.tab": "[POLICY_TOGGLE]",
         "`": "[SIM_REBORN]",
         "<": "[MOTION_FADE_IN]",  # note: with shift

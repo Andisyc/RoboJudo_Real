@@ -135,20 +135,31 @@ class FADAUpdateResult:
     duration_s: float
 
 
+@dataclass(frozen=True)
+class FADALearnerRestart:
+    generation: int
+    policy_version: int
+
+
 def _learner_main(initial, config, jobs, results, stopping):
     """Importable spawn target. No SDK, environment, or Planner forward is created."""
     try:
         torch.set_num_threads(config["learner_threads"])
         runtime = _restore_runtime(initial, config["learner_device"])
         common = {"lr": config["learning_rate"], "max_grad_norm": config["max_grad_norm"]}
-        if runtime.method == "fada":
-            updater = FADALegacyUpdater(runtime, lambda_forget=config["lambda_forget"], **common)
-        else:
-            updater = FADAExpertUpdater(runtime, sigma=config["sigma"], **common)
-        results.send({"kind": "ready"})
-        version = 0
+        def new_updater():
+            if runtime.method == "fada":
+                return FADALegacyUpdater(runtime, lambda_forget=config["lambda_forget"], **common)
+            return FADAExpertUpdater(runtime, sigma=config["sigma"], **common)
+
+        updater = new_updater()
         parameters = dict(fada_adapter_named_parameters(runtime.policy))
         device = next(iter(parameters.values())).device
+        initial_adapters = {name: parameter.detach().clone() for name, parameter in parameters.items()}
+        initial_cpu_rng = torch.get_rng_state()
+        initial_cuda_rng = torch.cuda.get_rng_state(device) if device.type == "cuda" else None
+        results.send({"kind": "ready"})
+        version = 0
         rollback = None
         while not stopping.is_set():
             try:
@@ -157,6 +168,20 @@ def _learner_main(initial, config, jobs, results, stopping):
                 continue
             if stopping.is_set():
                 break
+            if isinstance(job, FADALearnerRestart):
+                if job.policy_version not in (version, version + 1):
+                    raise ValueError("learner restart version does not match the active lineage")
+                with torch.no_grad():
+                    for name, parameter in parameters.items():
+                        parameter.copy_(initial_adapters[name])
+                updater = new_updater()
+                torch.set_rng_state(initial_cpu_rng)
+                if initial_cuda_rng is not None:
+                    torch.cuda.set_rng_state(initial_cuda_rng, device)
+                version = job.policy_version
+                rollback = None
+                results.send(job)
+                continue
             started = time.monotonic()
             if job.learner_base_version != version:
                 if rollback is None or job.learner_base_version != version - 1:
@@ -240,6 +265,7 @@ class FADALearnerWorker:
         self._stopping = _StopFlag(self._context)
         self._process = None
         self._job: FADAUpdateJob | None = None
+        self._restart: FADALearnerRestart | None = None
         self._submitted_at = None
         self._next_job_id = 1
         self.learner_version = 0
@@ -357,6 +383,40 @@ class FADALearnerWorker:
         self.state = "BUSY"
         return job
 
+    def submit_restart(self, *, generation: int, policy_version: int) -> None:
+        if self.state != "READY" or self._job is not None or self._restart is not None:
+            self._fail("learner restart requires an idle worker")
+        if policy_version != self.learner_version + 1:
+            self._fail("learner restart requires the next policy version")
+        request = FADALearnerRestart(generation, policy_version)
+        try:
+            self._jobs.put_nowait(request)
+        except queue.Full:
+            self._fail("learner restart queue unexpectedly full")
+        self._restart = request
+        self._submitted_at = time.monotonic()
+        self.state = "BUSY"
+
+    def poll_restart(self) -> FADALearnerRestart | None:
+        if self.state == "FAILED":
+            raise FADALearnerError(self.failure)
+        if self._restart is None or self.state != "BUSY":
+            self._fail("learner has no pending restart")
+        result = self._poll_message()
+        if result is None:
+            assert self._submitted_at is not None
+            if time.monotonic() - self._submitted_at > self.config.update_timeout_s:
+                self._fail("learner restart timed out")
+            return None
+        if not isinstance(result, FADALearnerRestart) or result != self._restart:
+            self._fail("learner restart acknowledgment mismatch")
+        self.learner_version = result.policy_version
+        self._restart = None
+        self._submitted_at = None
+        self.last_latency_s = None
+        self.state = "READY"
+        return result
+
     def validate_adapters(self, data: bytes) -> dict[str, torch.Tensor]:
         try:
             values = _load(data)
@@ -379,11 +439,7 @@ class FADALearnerWorker:
         self.learner_version = policy_version
 
 
-    def poll(self) -> tuple[FADAUpdateResult, dict[str, torch.Tensor]] | None:
-        if self.state == "FAILED":
-            raise FADALearnerError(self.failure)
-        if self.state in ("NEW", "STOPPING", "STOPPED"):
-            return None
+    def _poll_message(self):
         if self._received is not None:
             result, self._received = self._received, None
         else:
@@ -395,6 +451,14 @@ class FADALearnerWorker:
             self._fail(result["error"])
         if self._process is None or not self._process.is_alive():
             self._fail("learner exited unexpectedly")
+        return result
+
+    def poll(self) -> tuple[FADAUpdateResult, dict[str, torch.Tensor]] | None:
+        if self.state == "FAILED":
+            raise FADALearnerError(self.failure)
+        if self.state in ("NEW", "STOPPING", "STOPPED") or self._restart is not None:
+            return None
+        result = self._poll_message()
         if result is None:
             if self._job is not None:
                 assert self._submitted_at is not None

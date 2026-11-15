@@ -46,6 +46,9 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         self._control_step = 0
         self._adaptation_started = False
         self._pending_collection = False
+        self._last_submitted_moving: bool | None = None
+        self._issued_moving = False
+        self._restart_motion_blocked = False
         self._pending_snapshot = None
         self._pending_evidence = None
         self._pending_sensor = None
@@ -249,6 +252,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         )
         self.playback_controller.commit_action(snapshot.action_snapshot)
         self.last_action = snapshot.action_snapshot.squeeze(0).cpu().numpy().copy()
+        self._last_submitted_moving = self._issued_moving
         if self._pending_collection:
             self.online_coordinator.record_action(snapshot, evidence)
         self._pending_snapshot = None
@@ -340,7 +344,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         self._preset_wait_release = bool(self._held_motion_keys or self._preset_key_down)
         self._keyboard_command.fill(0.0)
 
-    def _commands_with_preset(self, events) -> np.ndarray:
+    def _commands_with_preset(self, events, *, inhibit: bool = False) -> np.ndarray:
         cancel = any(
             event.get("type") == "keyboard" and event.get("name") == "x" and event.get("pressed", False)
             for event in events
@@ -348,7 +352,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         inactive = self._control_active is False or (
             self.keyboard_command_mode == "hardware_hold" and self._control_active is not True
         )
-        blocked = cancel or self._preset_wait_release or inactive
+        blocked = inhibit or cancel or self._preset_wait_release or inactive
         for event in events:
             if event.get("type") != "keyboard":
                 continue
@@ -450,6 +454,30 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             )
         return self._keyboard_command.copy()
 
+    def _commands_with_adaptation_restart(self, ctrl_data) -> np.ndarray:
+        coordinator = self.online_coordinator
+        if coordinator is None:
+            return self._get_commands(ctrl_data)
+        keyboard = ctrl_data.get("KeyboardCtrl")
+        if coordinator.restart_pending or self._restart_motion_blocked:
+            events = keyboard.get("keyboard_event", []) if keyboard is not None else ()
+            commands = self._commands_with_preset(events, inhibit=True)
+            self._restart_motion_blocked = bool(self._held_motion_keys or self._preset_key_down)
+            if self._control_active:
+                coordinator.advance_restart_at_step_boundary()
+            return commands
+        commands = self._get_commands(ctrl_data)
+        if "[LORA_RESTART]" in ctrl_data.get("COMMANDS", []):
+            if (keyboard is None or ctrl_data.get("RemoteKeyboardCtrl") is not None
+                    or not self._control_active or self._last_submitted_moving is not False
+                    or np.any(commands != 0.0)):
+                logger.warning("[LORA RESTART] rejected: requires local active control and zero current and previous velocity commands")
+            elif coordinator.request_adaptation_restart():
+                self._adaptation_started = False
+                self._cancel_preset()
+                coordinator.advance_restart_at_step_boundary()
+        return commands
+
     def get_observation(self, env_data, ctrl_data):
         if self._stopping:
             raise RuntimeError("FADA control has stopped")
@@ -471,9 +499,10 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                 )
             }
             self._pending_sensor["source"] = env_data.get("source", "hardware")
-        commands = self._get_commands(ctrl_data)
+        commands = self._commands_with_adaptation_restart(ctrl_data)
         if self.online_coordinator is not None:
-            enabled = bool(np.any(commands != 0.0)) and not self._lora_frozen
+            self._issued_moving = bool(np.any(commands != 0.0))
+            enabled = self._issued_moving and not self._lora_frozen
             if enabled != self.online_coordinator.updates_enabled:
                 self.online_coordinator.set_updates_enabled(enabled)
                 self._adaptation_started = False

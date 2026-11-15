@@ -882,6 +882,14 @@ coordinator and learner worker together. After loading the updated program,
 freeze/unfreeze is in-process; this feature does not hot-patch an already
 running older program or change the deployed checkpoint file.
 
+On either local online FADA profile, press X to zero the velocity command, wait
+until the robot is stable, then press and release Z to restart adaptation.
+Wait for `[LORA RESTART] complete` before pressing W or P again. Z restores the
+initial LoRA, resets Adam and the training samples, and discards old updates.
+It does not reload the checkpoint, restart control, or change manual F/R freeze
+state. Z is rejected rather than queued when the current or previous submitted
+velocity command is nonzero.
+
 
 ### Remote hold-to-move keyboard (isolated echo first)
 

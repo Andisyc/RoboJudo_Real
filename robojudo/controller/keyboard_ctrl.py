@@ -108,7 +108,7 @@ class KeyboardCtrl(Controller):
         if len(self.triggers) == 0:
             return ctrl_data, commands
 
-        for event in ctrl_data["keyboard_event"]:
+        for event in ctrl_data["keyboard_event"][:]:
             if event["type"] == "keyboard" and not event["pressed"]:  # trigger when key is released
                 command = self.triggers.get(event["name"], None)
                 if command is not None:

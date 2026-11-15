@@ -1288,6 +1288,97 @@ class TestFADAOnlineWorker(unittest.TestCase):
             with self.subTest(method=method):
                 self.exercise_real_method(method)
 
+    def test_lora_restart_discards_inflight_and_relearns_from_cold_state(self):
+        for method in ("fada", "expert_difference"):
+            with self.subTest(method=method):
+                self.issued = {}
+                runtime, cfg = self.prepared(method)
+                coordinator = FADAOnlineCoordinator(runtime, cfg)
+                reference = _restore_runtime(coordinator.worker._initial, "cpu")
+                common = dict(lr=cfg.learning_rate, max_grad_norm=cfg.max_grad_norm)
+                updater = (FADALegacyUpdater(reference, lambda_forget=cfg.lambda_forget, **common)
+                           if method == "fada" else FADAExpertUpdater(reference, sigma=cfg.sigma, **common))
+                context = coordinator.worker._context
+                entered, release = context.Event(), context.Event()
+                release.set()
+                target = functools.partial(_controlled_fada_learner, entered=entered, release=release)
+                try:
+                    with patch("robojudo.policy.fada.online_worker._learner_main", target):
+                        coordinator.start()
+                    pid = coordinator.worker.process.pid
+                    for step in range(80):
+                        if self.event(coordinator, step) is not None:
+                            break
+                    else:
+                        self.fail("initial batch was not submitted")
+                    self.completion(coordinator)
+                    self.assertTrue(coordinator.apply_pending_at_step_boundary())
+                    probe = (self.probe.observation_history, self.probe.action_history, self.probe.command)
+                    baseline = reference.infer(*probe)
+                    self.assertFalse(torch.equal(runtime.infer(*probe), baseline))
+
+                    entered.clear()
+                    release.clear()
+                    for step in range(step + 1, step + 80):
+                        old_job = self.event(coordinator, step)
+                        if old_job is not None:
+                            break
+                    self.assertIsNotNone(old_job)
+                    self.assertTrue(entered.wait(5))
+                    adapter = object.__new__(FADAPlannerIDMPolicyAdapter)
+                    adapter.online_coordinator = coordinator
+                    adapter._control_active = True
+                    adapter._last_submitted_moving = True
+                    adapter._restart_motion_blocked = False
+                    adapter.keyboard_command_mode = "hardware_hold"
+                    adapter.keyboard_command_magnitudes = np.array([0.4, 0.4, 0.8], dtype=np.float32)
+                    adapter._keyboard_command = np.zeros(3, dtype=np.float32)
+                    adapter._held_motion_keys = set()
+                    adapter._preset_command = np.array([0.3, 0.0, 0.0], dtype=np.float32)
+                    adapter._preset_active = adapter._preset_key_down = adapter._preset_wait_release = False
+
+                    def command(*events, restart=False):
+                        return adapter._commands_with_adaptation_restart({
+                            "COMMANDS": ["[LORA_RESTART]"] if restart else [],
+                            "KeyboardCtrl": {"keyboard_event": [
+                                {"type": "keyboard", "name": key, "pressed": pressed}
+                                for key, pressed in events
+                            ]},
+                        })
+
+                    command(("x", True), restart=True)
+                    self.assertFalse(coordinator.restart_pending)
+                    adapter._last_submitted_moving = False
+                    command(restart=True)
+                    self.assertTrue(coordinator.restart_pending)
+                    self.assertIs(coordinator.worker.pending_job, old_job)
+                    np.testing.assert_array_equal(command(("p", True)), np.zeros(3))
+                    release.set()
+                    for _ in range(2):
+                        self.assertTrue(coordinator.worker.wait_for_message(5))
+                        np.testing.assert_array_equal(command(), np.zeros(3))
+                    self.assertFalse(coordinator.restart_pending)
+                    self.assertEqual(coordinator.worker.process.pid, pid)
+                    self.assertEqual(coordinator.discarded_updates, 1)
+                    self.assertFalse(coordinator.status["publication_pending"])
+                    torch.testing.assert_close(runtime.infer(*probe), baseline, rtol=0, atol=0)
+                    np.testing.assert_array_equal(command(), np.zeros(3))
+                    np.testing.assert_array_equal(command(("p", False)), np.zeros(3))
+                    np.testing.assert_allclose(command(("p", True)), [0.3, 0, 0])
+
+                    coordinator.set_updates_enabled(True)
+                    for step in range(step + 1, step + 80):
+                        new_job = self.event(coordinator, step)
+                        if new_job is not None:
+                            break
+                    self.assertIsNotNone(new_job)
+                    new_result = self.completion(coordinator)
+                    self.assertGreater(new_job.identity.generation, old_job.identity.generation)
+                    self.reference_step(reference, updater, new_job, cfg, new_result)
+                finally:
+                    release.set()
+                    coordinator.close()
+
     def test_bad_publication_never_mutates_or_acknowledges(self):
         self.issued = {}
         runtime, cfg = self.prepared("expert_difference", window_size=1, warmup_steps=0, update_interval=1)

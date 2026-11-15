@@ -42,6 +42,11 @@ class FADAOnlineCoordinator:
                 window_size=config.window_size,
             )
         self.worker = FADALearnerWorker(runtime, self.config)
+        self._initial_adapters = {
+            name: value.detach().clone() for name, value in fada_adapter_named_parameters(runtime.policy)
+        }
+        self._restart_generation: int | None = None
+        self._restart_sent = False
         self._owner = threading.get_ident()
         self.episode_id = 0
         self.generation = 0
@@ -64,6 +69,53 @@ class FADAOnlineCoordinator:
         self.failure: str | None = None
         self.last_update: dict | None = None
         self._reported_rejections: set[tuple[str, str | None]] = set()
+
+    @property
+    def restart_pending(self) -> bool:
+        return self._restart_generation is not None
+
+    def request_adaptation_restart(self) -> bool:
+        self._check_owner()
+        if self._stopping or self.restart_pending:
+            return False
+        self.updates_enabled = False
+        self.reset()
+        self._restart_generation = self.generation
+        self._discard_before_generation = self.generation
+        self._outbox.clear()
+        self._last_submitted = None
+        self.last_update = None
+        if self._publication is not None:
+            self.worker.discard_result(self.policy_version)
+            self._publication = None
+            self.discarded_updates += 1
+        logger.info("[LORA RESTART] accepted generation=%d", self.generation)
+        return True
+
+    def advance_restart_at_step_boundary(self) -> None:
+        self._check_owner()
+        if self._stopping or self._restart_generation is None:
+            return
+        try:
+            if not self._restart_sent:
+                self.poll()  # Keep ownership of the obsolete job until validated and discarded.
+                if self.worker.pending_job is not None:
+                    return
+                self.worker.submit_restart(
+                    generation=self._restart_generation, policy_version=self.policy_version + 1,
+                )
+                self._restart_sent = True
+                return
+            result = self.worker.poll_restart()
+        except FADALearnerError as error:
+            self._fail(str(error))
+        if result is None:
+            return
+        self._copy_adapters(self._initial_adapters)
+        self.policy_version = result.policy_version
+        self._restart_generation = None
+        self._restart_sent = False
+        logger.info("[LORA RESTART] complete version=%d", self.policy_version)
 
     def _report_rejection(self, stage: str, result, evidence: FADAControlEvidence) -> None:
         if result.accepted:
@@ -133,6 +185,8 @@ class FADAOnlineCoordinator:
             raise TypeError("updates_enabled must be boolean")
         if self._stopping:
             raise FADALearnerError("coordinator is stopping")
+        if enabled and self.restart_pending:
+            raise FADALearnerError("cannot enable learning during a LoRA restart")
         if enabled == self.updates_enabled:
             return
         self.updates_enabled = enabled
@@ -272,18 +326,7 @@ class FADAOnlineCoordinator:
         return result
 
     @torch.no_grad()
-    def apply_pending_at_step_boundary(self) -> bool:
-        self._check_owner()
-        if self._stopping or not self.updates_enabled or not self._active or not self._accepted_frame:
-            return False
-        if self.runtime.method == "fada" and self._update_start_step is None:
-            return False
-        self.poll()
-        if self._publication is None:
-            return False
-        result, values = self._publication
-        if result.learner_version != self.policy_version + 1:
-            self._fail("publication version is not the next full learner version")
+    def _copy_adapters(self, values: dict[str, torch.Tensor]) -> None:
         parameters = dict(fada_adapter_named_parameters(self.runtime.policy))
         try:
             if set(parameters) != set(values) or any(
@@ -297,6 +340,20 @@ class FADAOnlineCoordinator:
                 parameter.copy_(staged[name])
         except Exception as error:
             self._fail(f"full LoRA application failed; actor must not infer again: {error}")
+
+    def apply_pending_at_step_boundary(self) -> bool:
+        self._check_owner()
+        if self._stopping or not self.updates_enabled or not self._active or not self._accepted_frame:
+            return False
+        if self.runtime.method == "fada" and self._update_start_step is None:
+            return False
+        self.poll()
+        if self._publication is None:
+            return False
+        result, values = self._publication
+        if result.learner_version != self.policy_version + 1:
+            self._fail("publication version is not the next full learner version")
+        self._copy_adapters(values)
         self.policy_version = result.learner_version
         self._publication = None
         logger.info(

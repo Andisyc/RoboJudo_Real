@@ -31,7 +31,7 @@ def parse_args():
         help="Name of the config class to use",)
     parser.add_argument(
         "--keyboard-hold", action="store_true",
-        help="FADA MuJoCo or local G1 hardware baseline: release motion keys to zero their axes",
+        help="FADA MuJoCo or local G1 FADA hardware: release motion keys to zero their axes",
     )
     parser.add_argument("--freeze-lora", action="store_true", help="Start with current LoRA frozen; F freezes and R unfreezes during execution")
     parser.add_argument(
@@ -44,7 +44,7 @@ def parse_args():
     )
     parser.add_argument(
         "--hardware-forward-speed-limit", type=float, metavar="M/S",
-        help="Local G1 hardware baseline: set the maximum positive VX without changing W's speed",
+        help="Local G1 FADA hardware: set the maximum positive VX without changing W's speed",
     )
     
     args = parser.parse_args()
@@ -76,13 +76,14 @@ def _apply_keyboard_options(cfg: RlPipelineCfg, args) -> None:
         return
     simulation = cfg.env.env_type == "MujocoEnv" and cfg.env.is_sim
     hardware = (
-        args.config == "g1_real_fada_baseline" and cfg.robot == "g1"
+        args.config in ("g1_real_fada_baseline", "g1_real_fada_online", "g1_real_fada_expert_online")
+        and cfg.robot == "g1"
         and cfg.env.env_type == "UnitreeCppEnv" and not cfg.env.is_sim
     )
     if forward_limit is not None and (not hardware or not keyboard_requested):
-        raise ValueError("--hardware-forward-speed-limit requires the local g1_real_fada_baseline and a keyboard option")
+        raise ValueError("--hardware-forward-speed-limit requires a local G1 FADA hardware profile and a keyboard option")
     if not (simulation or hardware) or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter":
-        raise ValueError("Keyboard options require FADA MuJoCo or the local g1_real_fada_baseline profile")
+        raise ValueError("Keyboard options require FADA MuJoCo or a supported local G1 FADA hardware profile")
     if len(cfg.ctrl) != 1 or not isinstance(cfg.ctrl[0], KeyboardCtrlCfg):
         raise ValueError("Keyboard options require a single local KeyboardCtrl")
     overrides = {}

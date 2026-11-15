@@ -832,7 +832,10 @@ Use `--key-speed w=0.5 q=0.3` to set individual local manual-key magnitudes
 Use nonnegative values; the key determines the direction. This does not change
 the P preset or select hold mode.
 
-### Local desktop keyboard on the G1 FADA hardware baseline
+### Local desktop keyboard on G1 FADA hardware
+
+Supported profiles: `g1_real_fada_baseline`, `g1_real_fada_online`, and
+`g1_real_fada_expert_online`. Remote-input profiles are unchanged.
 
 From the server's local X11 desktop (not SSH), keep `DISPLAY` set and run:
 
@@ -847,8 +850,8 @@ zeros all axes. Esc requests shutdown. The keyboard listener is global: use a
 dedicated desktop and do not type in other applications while control is active.
 Zero velocity is not a physical emergency stop.
 
-Any of the three options selects this desktop hold mode on the hardware baseline.
-Without these options, the existing baseline input mode is unchanged. The
+`--keyboard-hold`, `--key-speed`, or `--preset-command` selects this desktop
+hold mode. Without them, each profile retains its existing input mode. The
 default forward command limit is 0.4 m/s. To explicitly allow a 0.5 m/s forward
 preset without changing W's default speed, add
 `--hardware-forward-speed-limit 0.5 --preset-command 0.5`.

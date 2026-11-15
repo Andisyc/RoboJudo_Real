@@ -7,12 +7,14 @@ from box import Box
 import robojudo.environment
 import robojudo.policy
 from robojudo.controller import CtrlManager
+from robojudo.controller.ctrl_cfgs import KeyboardCtrlCfg
 from robojudo.environment import Environment
 from robojudo.pipeline import Pipeline, pipeline_registry
 from robojudo.pipeline.pipeline_cfgs import RlPipelineCfg
 from robojudo.policy import Policy, PolicyCfg
 from robojudo.tools.dof import DoFAdapter
 from robojudo.tools.tool_cfgs import DoFConfig
+from robojudo.tools.trajectory_trigger import request_trajectory_start
 from robojudo.utils.progress import ProgressBar
 from robojudo.utils.util_func import get_gravity_orientation
 
@@ -184,9 +186,13 @@ class RlPipeline(Pipeline):
     _checking = False
     _env_shutdown_attempted = False
     _env_shutdown_error = None
+    _record_hardware_forward = False
 
     def __init__(self, cfg: RlPipelineCfg):
         super().__init__(cfg=cfg)
+        self._record_hardware_forward = any(
+            isinstance(ctrl, KeyboardCtrlCfg) and ctrl.hardware_motion for ctrl in self.cfg.ctrl
+        )
 
         try:
             prepared_policy = None
@@ -419,6 +425,9 @@ class RlPipeline(Pipeline):
                 )
             else:
                 receipt = self.env.step(pd_target, extras.get("hand_pose", None))
+                if self._record_hardware_forward and receipt is not None and extras["commands"][0] > 0:
+                    request_trajectory_start()
+                    self._record_hardware_forward = False
             if online is not None:
                 if self.cfg.env.is_sim and not self.env.enabled:
                     self.request_stop()

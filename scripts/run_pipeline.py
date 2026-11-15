@@ -39,16 +39,16 @@ def parse_args():
     )
     parser.add_argument(
         "--keyboard-hold", action="store_true",
-        help="FADA MuJoCo only: local desktop keyboard, release motion keys to zero their axes",
+        help="FADA MuJoCo or local G1 hardware baseline: release motion keys to zero their axes",
     )
     parser.add_argument("--freeze-lora", action="store_true", help="Start with current LoRA frozen; F freezes and R unfreezes during execution")
     parser.add_argument(
         "--preset-command", nargs=3, type=float, metavar=("VX", "VY", "YAW"),
-        help="FADA MuJoCo only: P starts this local keyboard preset (m/s, m/s, rad/s); X cancels",
+        help="Local FADA desktop: P starts this keyboard preset (m/s, m/s, rad/s); X cancels",
     )
     parser.add_argument(
         "--key-speed", nargs="+", action="extend", metavar="KEY=SPEED",
-        help="FADA MuJoCo only: override local W/S/A/D/Q/E magnitudes independently (m/s or rad/s)",
+        help="Local FADA keyboard: override W/S/A/D/Q/E magnitudes independently (m/s or rad/s)",
     )
     
     args = parser.parse_args()
@@ -70,6 +70,42 @@ def parse_args():
     return args
 
 
+def _apply_keyboard_options(cfg: RlPipelineCfg, args) -> None:
+    if not (args.keyboard_hold or args.preset_command is not None or args.key_speed):
+        return
+    simulation = cfg.env.env_type == "MujocoEnv" and cfg.env.is_sim
+    hardware = (
+        args.config == "g1_real_fada_baseline" and cfg.robot == "g1"
+        and cfg.env.env_type == "UnitreeCppEnv" and not cfg.env.is_sim
+    )
+    if not (simulation or hardware) or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter":
+        raise ValueError("Keyboard options require FADA MuJoCo or the local g1_real_fada_baseline profile")
+    if len(cfg.ctrl) != 1 or not isinstance(cfg.ctrl[0], KeyboardCtrlCfg):
+        raise ValueError("Keyboard options require a single local KeyboardCtrl")
+    overrides = {}
+    if args.preset_command is not None:
+        overrides["preset_velocity_command"] = args.preset_command
+    if args.key_speed:
+        overrides["keyboard_speed_overrides"] = {
+            **cfg.policy.keyboard_speed_overrides, **args.key_speed,
+        }
+    if hardware:
+        if (not os.environ.get("DISPLAY") or os.environ.get("SSH_CONNECTION")
+                or os.environ.get("XDG_SESSION_TYPE") == "wayland"):
+            raise ValueError("Hardware keyboard options require a local X11 desktop; do not unset DISPLAY or use SSH")
+        overrides["keyboard_command_mode"] = "hardware_hold"
+    elif args.keyboard_hold:
+        overrides["keyboard_command_mode"] = "hold"
+    if overrides:
+        cfg.policy = type(cfg.policy).model_validate({**cfg.policy.model_dump(), **overrides})
+    if hardware:
+        # Fail before constructing the robot environment if the desktop backend cannot load.
+        from robojudo.controller.utils import keyboard  # noqa: F401
+
+    if hardware or args.keyboard_hold or args.preset_command is not None:
+        cfg.ctrl = [cfg.ctrl[0].model_copy(update={"backend": "pynput", "hardware_motion": hardware})]
+
+
 def main():
     args = parse_args()
     logger.info(f"Using config: {args.config}")
@@ -81,30 +117,7 @@ def main():
         if cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter":
             raise ValueError("--freeze-lora requires a FADA Planner-IDM policy")
         cfg.policy.online_adaptation.freeze_lora = True
-    if args.keyboard_hold or args.preset_command is not None:
-        option = "--preset-command" if args.preset_command is not None else "--keyboard-hold"
-        if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
-                or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):
-            raise ValueError(f"{option} requires FADA MuJoCo simulation, never a real-robot profile")
-        if len(cfg.ctrl) != 1 or not isinstance(cfg.ctrl[0], KeyboardCtrlCfg):
-            raise ValueError(f"{option} requires a single local KeyboardCtrl")
-        cfg.ctrl = [cfg.ctrl[0].model_copy(update={"backend": "pynput"})]
-    policy_overrides = {}
-    if args.preset_command is not None:
-        policy_overrides["preset_velocity_command"] = args.preset_command
-    if args.key_speed:
-        if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
-                or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):
-            raise ValueError("--key-speed requires FADA MuJoCo simulation, never a real-robot profile")
-        if len(cfg.ctrl) != 1 or not isinstance(cfg.ctrl[0], KeyboardCtrlCfg):
-            raise ValueError("--key-speed requires a single local KeyboardCtrl")
-        policy_overrides["keyboard_speed_overrides"] = {
-            **cfg.policy.keyboard_speed_overrides, **args.key_speed,
-        }
-    if policy_overrides:
-        cfg.policy = type(cfg.policy).model_validate({**cfg.policy.model_dump(), **policy_overrides})
-    if args.keyboard_hold:
-        cfg.policy.keyboard_command_mode = "hold"
+    _apply_keyboard_options(cfg, args)
     if args.left_shoulder_load:
         if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
                 or cfg.robot != "g1" or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):

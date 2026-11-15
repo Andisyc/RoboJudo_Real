@@ -13,10 +13,14 @@ from robojudo.tools.trajectory_trigger import request_trajectory_start
 @ctrl_registry.register
 class KeyboardCtrl(Controller):
     cfg_ctrl: KeyboardCtrlCfg
+    _hardware_motion = False
 
     def __init__(self, cfg_ctrl: KeyboardCtrlCfg, env=None, **kwargs):  # TODO
         super().__init__(cfg_ctrl=cfg_ctrl, env=env, **kwargs)
 
+        self._hardware_motion = cfg_ctrl.hardware_motion
+        if self._hardware_motion and cfg_ctrl.backend != "pynput":
+            raise ValueError("Hardware motion requires a real press/release keyboard backend")
         self.event_queue = Queue(maxsize=100)
         self.keyboard_input = self._create_keyboard_input(cfg_ctrl.backend)
         self.keyboard_input.start()
@@ -46,10 +50,13 @@ class KeyboardCtrl(Controller):
                     "KeyboardCtrl could not start the pynput backend; use "
                     "KeyboardCtrlCfg(backend='terminal') in an SSH terminal"
                 ) from exc
-            return KeyboardThread(self.event_queue)
+            return KeyboardThread(self.event_queue, hardware_motion=self._hardware_motion)
         raise ValueError(f"Unknown KeyboardCtrl backend: {resolved_backend}")
 
     def reset(self):
+        if self._hardware_motion:
+            # Keep release events paired with keys the policy blocked during preparation.
+            return
         reset_input = getattr(self.keyboard_input, "reset", None)
         if reset_input is not None:
             reset_input()
@@ -60,6 +67,8 @@ class KeyboardCtrl(Controller):
                 break
 
     def get_events(self):
+        if self._hardware_motion and self.keyboard_input.input_failed():
+            raise RuntimeError("Hardware keyboard listener stopped or overflowed")
         poll_input = getattr(self.keyboard_input, "poll", None)
         if poll_input is not None:
             poll_input()
@@ -69,13 +78,16 @@ class KeyboardCtrl(Controller):
                 event = self.event_queue.get_nowait()
                 events.append(event)
                 if (
-                    event.get("type") == "keyboard"
+                    not self._hardware_motion
+                    and event.get("type") == "keyboard"
                     and event.get("name") == "w"
                     and event.get("pressed", False)
                 ):
                     request_trajectory_start()
             except Empty:
                 break
+        if self._hardware_motion and self.keyboard_input.input_failed():
+            raise RuntimeError("Hardware keyboard listener stopped or overflowed")
         return events
 
     def get_data(self):

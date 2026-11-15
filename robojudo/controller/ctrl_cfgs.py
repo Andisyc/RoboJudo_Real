@@ -17,6 +17,7 @@ class KeyboardCtrlCfg(CtrlCfg):
 
     backend: Literal["auto", "pynput", "terminal"] = "auto"
     """Keyboard input backend. Auto uses the SSH terminal on headless Linux."""
+    hardware_motion: bool = False
 
     combination_init_buttons: list[str] = ["Key.ctrl_l"]
     """first button in combination, need to be held down to trigger other commands;"""

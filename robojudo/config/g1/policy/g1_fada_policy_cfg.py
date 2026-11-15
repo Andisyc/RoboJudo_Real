@@ -71,7 +71,7 @@ class G1FADAPlannerIDMPolicyCfg(G1UniLabPolicyCfg):
     # source task limits.
     keyboard_command_magnitudes: list[float] = [0.6, 0.4, 0.8]
     keyboard_speed_overrides: dict[Literal["w", "s", "a", "d", "q", "e"], _KeyboardSpeed] = Field(default_factory=dict)
-    keyboard_command_mode: Literal["latch", "hold"] = "latch"
+    keyboard_command_mode: Literal["latch", "hold", "hardware_hold"] = "latch"
     preset_velocity_command: tuple[_VelocityComponent, _VelocityComponent, _VelocityComponent] | None = None
     # v022 inherits the FADA distill MuJoCo control contract, which maps raw
     # action chunks directly to joint-position offsets.
@@ -81,6 +81,21 @@ class G1FADAPlannerIDMPolicyCfg(G1UniLabPolicyCfg):
     action_clip: float | None = None
     obs_dof: DoFConfig = G1UniLabDistillDoF()
     action_dof: DoFConfig = obs_dof
+
+    @model_validator(mode="after")
+    def _validate_hardware_keyboard_speeds(self):
+        if self.keyboard_command_mode != "hardware_hold":
+            return self
+        limits = self.keyboard_command_magnitudes
+        if len(limits) != 3 or not all(0 < limit <= _FLOAT32_MAX for limit in limits):
+            raise ValueError("Hardware keyboard requires three finite positive baseline magnitudes")
+        for axis, pair in enumerate(("ws", "ad", "qe")):
+            for key in pair:
+                if self.keyboard_speed_overrides.get(key, 0.0) > limits[axis]:
+                    raise ValueError(f"--key-speed {key} exceeds the baseline limit {limits[axis]:g}")
+            if self.preset_velocity_command is not None and abs(self.preset_velocity_command[axis]) > limits[axis]:
+                raise ValueError(f"--preset-command {('VX', 'VY', 'YAW')[axis]} exceeds the baseline limit {limits[axis]:g}")
+        return self
 
     @property
     def policy_file(self) -> str:

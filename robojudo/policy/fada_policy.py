@@ -172,7 +172,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
     def reset(self):
         super().reset()
         if hasattr(self, "_held_motion_keys"):
-            if self._preset_command is not None:
+            if self._preset_command is not None or self.keyboard_command_mode == "hardware_hold":
                 self._cancel_preset()
             else:
                 self._held_motion_keys.clear()
@@ -213,7 +213,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
 
 
     def set_control_active(self, active: bool):
-        if self._preset_command is not None and not active:
+        if not active and (self._preset_command is not None or getattr(self, "keyboard_command_mode", None) == "hardware_hold"):
             self._cancel_preset()
         if self.online_coordinator is None:
             self._control_active = bool(active)
@@ -345,13 +345,16 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             event.get("type") == "keyboard" and event.get("name") == "x" and event.get("pressed", False)
             for event in events
         )
-        blocked = cancel or self._preset_wait_release or self._control_active is False
+        inactive = self._control_active is False or (
+            self.keyboard_command_mode == "hardware_hold" and self._control_active is not True
+        )
+        blocked = cancel or self._preset_wait_release or inactive
         for event in events:
             if event.get("type") != "keyboard":
                 continue
             key, pressed = event.get("name"), bool(event.get("pressed", False))
             if key == "p":
-                if pressed and not self._preset_key_down and not blocked:
+                if self._preset_command is not None and pressed and not self._preset_key_down and not blocked:
                     self._preset_active = True
                 self._preset_key_down = pressed
             elif key in KEY_AXES:
@@ -368,7 +371,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         elif self._preset_active:
             assert self._preset_command is not None
             return self._preset_command.copy()
-        elif self.keyboard_command_mode == "hold":
+        elif self.keyboard_command_mode in ("hold", "hardware_hold"):
             return self._command_from_held_keys(self._held_motion_keys)
         return self._keyboard_command.copy()
 
@@ -381,6 +384,12 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         key holds.  The x key clears all three command axes.
         """
         remote = ctrl_data.get("RemoteKeyboardCtrl")
+        if getattr(self, "keyboard_command_mode", None) == "hardware_hold":
+            keyboard_data = ctrl_data.get("KeyboardCtrl")
+            if keyboard_data is None or remote is not None:
+                self._cancel_preset()
+                return self._keyboard_command.copy()
+            return self._commands_with_preset(keyboard_data.get("keyboard_event", []))
         if remote is not None:
             return self._command_from_held_keys(
                 remote["keys"] if remote["fresh"] and remote["armed"] else (), remote=True,

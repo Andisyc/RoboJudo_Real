@@ -833,8 +833,8 @@ Hold W/S, A/D or Q/E to command their axes; release a key to cancel its axis.
 X zeros all axes and inhibits held keys until they have been released; opposite
 keys cancel. No F8 or Space is required in this local mode. Do not unset DISPLAY
 or use the SSH terminal backend. The listener is global to the local desktop.
-The flag rejects real-robot and remote-input profiles. Omitting it preserves
-legacy latch behavior. Motion-command zero does not guarantee instantaneous stop.
+Remote-input profiles do not accept this flag. Omitting it preserves legacy
+latch behavior in simulation. Motion-command zero does not guarantee instantaneous stop.
 Local hold and legacy profiles do not require the standalone `robojudo_keyboard`
 package. Only the opt-in remote controller and remote CLI depend on that package.
 
@@ -848,6 +848,26 @@ Use `--key-speed w=0.5 q=0.3` to set individual local manual-key magnitudes
 (m/s for W/S/A/D, rad/s for Q/E). Unspecified keys keep their configured defaults.
 Use nonnegative values; the key determines the direction. This does not change
 the P preset or select hold mode.
+
+### Local desktop keyboard on the G1 FADA hardware baseline
+
+From the server's local X11 desktop (not SSH), keep `DISPLAY` set and run:
+
+```bash
+./start.sh -c g1_real_fada_baseline \
+  --keyboard-hold --key-speed w=0.3 q=0.3 --preset-command 0.3 0 0.3
+```
+
+Wait for `prepare_done` before using the motion keys. W/S/A/D/Q/E use press and
+release, without F8 or Space. P latches the configured command; X cancels and
+zeros all axes. Esc requests shutdown. The keyboard listener is global: use a
+dedicated desktop and do not type in other applications while control is active.
+Zero velocity is not a physical emergency stop.
+
+Any of the three options selects this desktop hold mode on the hardware baseline.
+All overrides and preset components are bounded by the baseline's configured
+axis magnitudes (0.4 m/s forward/back and lateral, 0.8 rad/s yaw). Without these
+options, the existing baseline input mode is unchanged.
 
 ### Pause or freeze online LoRA updates
 

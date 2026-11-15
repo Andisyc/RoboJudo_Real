@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+import numpy as np
+from pydantic import Field, FiniteFloat, model_validator
 
 from robojudo.config import ASSETS_DIR
 from robojudo.config.config_class import Config
 from robojudo.tools.tool_cfgs import DoFConfig
 
 from .g1_unilab_policy_cfg import G1UniLabDistillDoF, G1UniLabPolicyCfg
+
+_FLOAT32_MAX = float(np.finfo(np.float32).max)
+_VelocityComponent = Annotated[FiniteFloat, Field(ge=-_FLOAT32_MAX, le=_FLOAT32_MAX)]
 
 
 class FADAOnlineAdaptationCfg(Config):
@@ -66,6 +70,7 @@ class G1FADAPlannerIDMPolicyCfg(G1UniLabPolicyCfg):
     # source task limits.
     keyboard_command_magnitudes: list[float] = [0.6, 0.4, 0.8]
     keyboard_command_mode: Literal["latch", "hold"] = "latch"
+    preset_velocity_command: tuple[_VelocityComponent, _VelocityComponent, _VelocityComponent] | None = None
     # v022 inherits the FADA distill MuJoCo control contract, which maps raw
     # action chunks directly to joint-position offsets.
     execution_action_scale: float = 1.0

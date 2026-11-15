@@ -838,6 +838,12 @@ legacy latch behavior. Motion-command zero does not guarantee instantaneous stop
 Local hold and legacy profiles do not require the standalone `robojudo_keyboard`
 package. Only the opt-in remote controller and remote CLI depend on that package.
 
+In the same local MuJoCo profiles, set `--preset-command VX VY YAW` to configure
+a fixed velocity in m/s, m/s and rad/s. Press P to start and X to cancel and zero
+all axes. Direction keys cannot override the preset. After X, release P and any
+held direction keys before pressing again. The preset does not require
+`--keyboard-hold`; that flag still controls how manual movement behaves.
+
 ### Pause or freeze online LoRA updates
 
 Both FADA and frozen-base trajectory-difference adaptation pause collection,

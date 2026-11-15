@@ -38,6 +38,8 @@ KEY_AXES = {
 class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
     """RoboJuDo runtime adapter for a native FADA Planner-IDM checkpoint."""
 
+    _preset_command: np.ndarray | None = None
+
     def __init__(self, cfg_policy, device):
         self.online_coordinator = None
         self._lora_frozen = bool(cfg_policy.online_adaptation.freeze_lora)
@@ -72,6 +74,11 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         self._keyboard_hold_blocked = False
         self._held_motion_keys: set[str] = set()
         self._keyboard_command = np.zeros(3, dtype=np.float32)
+        if cfg_policy.preset_velocity_command is not None:
+            self._preset_command = np.asarray(cfg_policy.preset_velocity_command, dtype=np.float32)
+        self._preset_active = False
+        self._preset_key_down = False
+        self._preset_wait_release = False
         self.playback_controller = FADAPlaybackController(
             self._runtime["runner"],
             device=self.device,
@@ -161,9 +168,12 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
     def reset(self):
         super().reset()
         if hasattr(self, "_held_motion_keys"):
-            self._held_motion_keys.clear()
-            self._keyboard_command.fill(0.0)
-            self._keyboard_hold_blocked = False
+            if self._preset_command is not None:
+                self._cancel_preset()
+            else:
+                self._held_motion_keys.clear()
+                self._keyboard_command.fill(0.0)
+                self._keyboard_hold_blocked = False
         if hasattr(self, "gait_phase_enabled") and not self.gait_phase_enabled:
             self.gait_phase = self.fixed_gait_phase.copy()
         if hasattr(self, "playback_controller"):
@@ -199,6 +209,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
 
 
     def set_control_active(self, active: bool):
+        if self._preset_command is not None and not active:
+            self._cancel_preset()
         if self.online_coordinator is None:
             self._control_active = bool(active)
             return
@@ -277,11 +289,12 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         if self.online_coordinator is not None and self._control_active:
             raise RuntimeError("cannot rewind an active online physical history")
         super().restore_state(state)  # type: ignore[arg-type]
-        self._held_motion_keys = set(state["held_motion_keys"])  # type: ignore[arg-type]
-        self._keyboard_hold_blocked = bool(state["keyboard_hold_blocked"])
-        self._keyboard_command = np.asarray(
-            state["keyboard_command"], dtype=np.float32
-        ).copy()
+        if self._preset_command is not None:
+            self._cancel_preset()
+        else:
+            self._held_motion_keys = set(state["held_motion_keys"])  # type: ignore[arg-type]
+            self._keyboard_hold_blocked = bool(state["keyboard_hold_blocked"])
+            self._keyboard_command = np.asarray(state["keyboard_command"], dtype=np.float32).copy()
         pending_command = state.get("pending_command")
         self._pending_command = (
             None
@@ -294,6 +307,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             if pending_observation is None
             else np.asarray(pending_observation, dtype=np.float32).copy()
         )
+        if self._preset_command is not None:
+            self._pending_command = self._pending_observation = None
         self.playback_controller.restore_state(state["playback"])  # type: ignore[arg-type]
 
     def post_step_callback(self, commands: list[str] | None = None):
@@ -305,6 +320,43 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         for key in keys:
             axis, sign = KEY_AXES[key]
             self._keyboard_command[axis] += sign * self.keyboard_command_magnitudes[axis]
+        return self._keyboard_command.copy()
+
+    def _cancel_preset(self) -> None:
+        self._preset_active = False
+        self._preset_wait_release = bool(self._held_motion_keys or self._preset_key_down)
+        self._keyboard_command.fill(0.0)
+
+    def _commands_with_preset(self, events) -> np.ndarray:
+        cancel = any(
+            event.get("type") == "keyboard" and event.get("name") == "x" and event.get("pressed", False)
+            for event in events
+        )
+        blocked = cancel or self._preset_wait_release or self._control_active is False
+        for event in events:
+            if event.get("type") != "keyboard":
+                continue
+            key, pressed = event.get("name"), bool(event.get("pressed", False))
+            if key == "p":
+                if pressed and not self._preset_key_down and not blocked:
+                    self._preset_active = True
+                self._preset_key_down = pressed
+            elif key in KEY_AXES:
+                if pressed:
+                    self._held_motion_keys.add(key)
+                    if not blocked and not self._preset_active and self.keyboard_command_mode == "latch":
+                        axis, sign = KEY_AXES[key]
+                        self._keyboard_command[axis] = sign * self.keyboard_command_magnitudes[axis]
+                else:
+                    self._held_motion_keys.discard(key)
+
+        if blocked:
+            self._cancel_preset()
+        elif self._preset_active:
+            assert self._preset_command is not None
+            return self._preset_command.copy()
+        elif self.keyboard_command_mode == "hold":
+            return self._command_from_held_keys(self._held_motion_keys)
         return self._keyboard_command.copy()
 
     def _get_commands(self, ctrl_data) -> np.ndarray:
@@ -323,6 +375,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         keyboard_data = ctrl_data.get("KeyboardCtrl")
         if keyboard_data is None:
             return super()._get_commands(ctrl_data)
+        if self._preset_command is not None:
+            return self._commands_with_preset(keyboard_data.get("keyboard_event", []))
         if getattr(self, "keyboard_command_mode", "latch") == "hold":
             for event in keyboard_data.get("keyboard_event", []):
                 if event.get("type") != "keyboard":

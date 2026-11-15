@@ -844,6 +844,11 @@ all axes. Direction keys cannot override the preset. After X, release P and any
 held direction keys before pressing again. The preset does not require
 `--keyboard-hold`; that flag still controls how manual movement behaves.
 
+Use `--key-speed w=0.5 q=0.3` to set individual local manual-key magnitudes
+(m/s for W/S/A/D, rad/s for Q/E). Unspecified keys keep their configured defaults.
+Use nonnegative values; the key determines the direction. This does not change
+the P preset or select hold mode.
+
 ### Pause or freeze online LoRA updates
 
 Both FADA and frozen-base trajectory-difference adaptation pause collection,

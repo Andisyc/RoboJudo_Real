@@ -46,10 +46,27 @@ def parse_args():
         "--preset-command", nargs=3, type=float, metavar=("VX", "VY", "YAW"),
         help="FADA MuJoCo only: P starts this local keyboard preset (m/s, m/s, rad/s); X cancels",
     )
+    parser.add_argument(
+        "--key-speed", nargs="+", action="extend", metavar="KEY=SPEED",
+        help="FADA MuJoCo only: override local W/S/A/D/Q/E magnitudes independently (m/s or rad/s)",
+    )
     
     args = parser.parse_args()
     if args.left_shoulder_load_delay_s is not None and not args.left_shoulder_load:
         parser.error("--left-shoulder-load-delay-s requires --left-shoulder-load")
+    overrides = {}
+    for entry in args.key_speed or ():
+        key, _, speed = entry.partition("=")
+        key = key.lower()
+        if len(key) != 1 or key not in "wasdqe" or not speed:
+            parser.error("--key-speed expects KEY=SPEED with KEY in W/S/A/D/Q/E")
+        if key in overrides:
+            parser.error(f"--key-speed repeats key {key!r}")
+        try:
+            overrides[key] = float(speed)
+        except ValueError:
+            parser.error(f"--key-speed expects a number for {key!r}")
+    args.key_speed = overrides
     return args
 
 
@@ -72,10 +89,20 @@ def main():
         if len(cfg.ctrl) != 1 or not isinstance(cfg.ctrl[0], KeyboardCtrlCfg):
             raise ValueError(f"{option} requires a single local KeyboardCtrl")
         cfg.ctrl = [cfg.ctrl[0].model_copy(update={"backend": "pynput"})]
+    policy_overrides = {}
     if args.preset_command is not None:
-        cfg.policy = type(cfg.policy).model_validate({
-            **cfg.policy.model_dump(), "preset_velocity_command": args.preset_command,
-        })
+        policy_overrides["preset_velocity_command"] = args.preset_command
+    if args.key_speed:
+        if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
+                or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):
+            raise ValueError("--key-speed requires FADA MuJoCo simulation, never a real-robot profile")
+        if len(cfg.ctrl) != 1 or not isinstance(cfg.ctrl[0], KeyboardCtrlCfg):
+            raise ValueError("--key-speed requires a single local KeyboardCtrl")
+        policy_overrides["keyboard_speed_overrides"] = {
+            **cfg.policy.keyboard_speed_overrides, **args.key_speed,
+        }
+    if policy_overrides:
+        cfg.policy = type(cfg.policy).model_validate({**cfg.policy.model_dump(), **policy_overrides})
     if args.keyboard_hold:
         cfg.policy.keyboard_command_mode = "hold"
     if args.left_shoulder_load:

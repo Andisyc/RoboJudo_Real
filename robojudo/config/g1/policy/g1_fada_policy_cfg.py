@@ -14,6 +14,7 @@ from .g1_unilab_policy_cfg import G1UniLabDistillDoF, G1UniLabPolicyCfg
 
 _FLOAT32_MAX = float(np.finfo(np.float32).max)
 _VelocityComponent = Annotated[FiniteFloat, Field(ge=-_FLOAT32_MAX, le=_FLOAT32_MAX)]
+_KeyboardSpeed = Annotated[FiniteFloat, Field(ge=0.0, le=_FLOAT32_MAX)]
 
 
 class FADAOnlineAdaptationCfg(Config):
@@ -69,6 +70,7 @@ class G1FADAPlannerIDMPolicyCfg(G1UniLabPolicyCfg):
     # Forward uses the curriculum's walking command; lateral and yaw use the
     # source task limits.
     keyboard_command_magnitudes: list[float] = [0.6, 0.4, 0.8]
+    keyboard_speed_overrides: dict[Literal["w", "s", "a", "d", "q", "e"], _KeyboardSpeed] = Field(default_factory=dict)
     keyboard_command_mode: Literal["latch", "hold"] = "latch"
     preset_velocity_command: tuple[_VelocityComponent, _VelocityComponent, _VelocityComponent] | None = None
     # v022 inherits the FADA distill MuJoCo control contract, which maps raw

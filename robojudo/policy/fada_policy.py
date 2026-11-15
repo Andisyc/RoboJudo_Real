@@ -28,10 +28,8 @@ from .unilab_policy import UniLabPolicy
 
 logger = logging.getLogger(__name__)
 
-KEY_AXES = {
-    "w": (0, 1), "s": (0, -1), "a": (1, 1),
-    "d": (1, -1), "q": (2, 1), "e": (2, -1),
-}
+_KEY_PAIRS = (("w", "s"), ("a", "d"), ("q", "e"))
+KEY_AXES = {key: (axis, sign) for axis, pair in enumerate(_KEY_PAIRS) for key, sign in zip(pair, (1, -1))}
 
 
 @policy_registry.register
@@ -39,6 +37,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
     """RoboJuDo runtime adapter for a native FADA Planner-IDM checkpoint."""
 
     _preset_command: np.ndarray | None = None
+    _manual_key_speeds: dict[str, float] | None = None
 
     def __init__(self, cfg_policy, device):
         self.online_coordinator = None
@@ -70,6 +69,11 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             raise ValueError(
                 "FADA keyboard_command_magnitudes must contain three positive values"
             )
+        if cfg_policy.keyboard_speed_overrides:
+            self._manual_key_speeds = {
+                key: cfg_policy.keyboard_speed_overrides.get(key, float(self.keyboard_command_magnitudes[axis]))
+                for key, (axis, _) in KEY_AXES.items()
+            }
         self.keyboard_command_mode = cfg_policy.keyboard_command_mode
         self._keyboard_hold_blocked = False
         self._held_motion_keys: set[str] = set()
@@ -315,11 +319,20 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         if self.gait_phase_enabled:
             super().post_step_callback(commands)
 
-    def _command_from_held_keys(self, keys) -> np.ndarray:
+    def _manual_key_speed(self, key: str, axis: int) -> float:
+        if self._manual_key_speeds is None:
+            return float(self.keyboard_command_magnitudes[axis])
+        return self._manual_key_speeds[key]
+
+    def _command_from_held_keys(self, keys, *, remote: bool = False) -> np.ndarray:
         self._keyboard_command.fill(0.0)
-        for key in keys:
-            axis, sign = KEY_AXES[key]
-            self._keyboard_command[axis] += sign * self.keyboard_command_magnitudes[axis]
+        for axis, (positive, negative) in enumerate(_KEY_PAIRS):
+            forward = positive in keys
+            if forward == (negative in keys):
+                continue
+            key = positive if forward else negative
+            speed = self.keyboard_command_magnitudes[axis] if remote else self._manual_key_speed(key, axis)
+            self._keyboard_command[axis] = speed if forward else -speed
         return self._keyboard_command.copy()
 
     def _cancel_preset(self) -> None:
@@ -346,7 +359,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                     self._held_motion_keys.add(key)
                     if not blocked and not self._preset_active and self.keyboard_command_mode == "latch":
                         axis, sign = KEY_AXES[key]
-                        self._keyboard_command[axis] = sign * self.keyboard_command_magnitudes[axis]
+                        self._keyboard_command[axis] = sign * self._manual_key_speed(key, axis)
                 else:
                     self._held_motion_keys.discard(key)
 
@@ -370,7 +383,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         remote = ctrl_data.get("RemoteKeyboardCtrl")
         if remote is not None:
             return self._command_from_held_keys(
-                remote["keys"] if remote["fresh"] and remote["armed"] else (),
+                remote["keys"] if remote["fresh"] and remote["armed"] else (), remote=True,
             )
         keyboard_data = ctrl_data.get("KeyboardCtrl")
         if keyboard_data is None:
@@ -414,7 +427,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                 next_command.fill(0.0)
             else:
                 axis, sign = key_axes[name]
-                next_command[axis] = sign * self.keyboard_command_magnitudes[axis]
+                next_command[axis] = sign * self._manual_key_speed(name, axis)
 
             if np.array_equal(next_command, self._keyboard_command):
                 continue

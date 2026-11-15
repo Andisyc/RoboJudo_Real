@@ -186,7 +186,7 @@ class TestHTTPCompatibility(unittest.TestCase):
         self.start(); status = self.client.get('/status').json()
         self.assertEqual(status['config_name'], 'g1_baduanjin_23dof_suite')
         self.assertEqual(status['sequence_index'], 0)
-        self.assertEqual(status['policy_name'], 'cut1_scratch_v2_i15000_zero_translation')
+        self.assertEqual(status['policy_name'], 'cut1_leftsmall_i80_20261112')
         for key in ('state', 'env', 'policy', 'timestep'): self.assertIn(key, status)
 
     def test_switch_and_return_routes_keep_existing_command_semantics(self):

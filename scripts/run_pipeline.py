@@ -41,6 +41,7 @@ def parse_args():
         "--keyboard-hold", action="store_true",
         help="FADA MuJoCo only: local desktop keyboard, release motion keys to zero their axes",
     )
+    parser.add_argument("--freeze-lora", action="store_true", help="Start with current LoRA frozen; F freezes and R unfreezes during execution")
     
     args = parser.parse_args()
     if args.left_shoulder_load_delay_s is not None and not args.left_shoulder_load:
@@ -55,6 +56,10 @@ def main():
     # get cfg from register (Import-Time Registry)
     config_manager = ConfigManager(config_name=args.config)
     cfg: RlPipelineCfg = config_manager.get_cfg()
+    if args.freeze_lora:
+        if cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter":
+            raise ValueError("--freeze-lora requires a FADA Planner-IDM policy")
+        cfg.policy.online_adaptation.freeze_lora = True
     if args.keyboard_hold:
         if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
                 or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):

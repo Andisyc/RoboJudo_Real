@@ -46,6 +46,9 @@ class FADAOnlineCoordinator:
         self.episode_id = 0
         self.generation = 0
         self.policy_version = 0
+        self.updates_enabled = not config.freeze_lora
+        self._discard_before_generation = 0
+        self.discarded_updates = 0
         self.collector.reset(episode_id=self.episode_id)
         self._outbox: deque[FADACausalWindow] = deque()
         self._inflight = ()
@@ -101,6 +104,7 @@ class FADAOnlineCoordinator:
                                 else self._step - self._collection_start_step),
             "pending_samples": pending, "inflight_samples": len(self._inflight),
             "publication_pending": self._publication is not None,
+            "updates_enabled": self.updates_enabled, "discarded_updates": self.discarded_updates,
             "last_update": self.last_update,
         }
 
@@ -122,6 +126,33 @@ class FADAOnlineCoordinator:
         if self._update_start_step is None:
             self._update_start_step = control_step
 
+    def set_updates_enabled(self, enabled: bool) -> None:
+        """Pause learning without changing actor weights, episode or inference history."""
+        self._check_owner()
+        if type(enabled) is not bool:
+            raise TypeError("updates_enabled must be boolean")
+        if self._stopping:
+            raise FADALearnerError("coordinator is stopping")
+        if enabled == self.updates_enabled:
+            return
+        self.updates_enabled = enabled
+        if not enabled:
+            self.generation += 1
+            self._discard_before_generation = self.generation
+            self.collector.reset(episode_id=self.episode_id)
+            self._outbox.clear()
+            self._collection_start_step = self._update_start_step = None
+            self._last_submitted = None
+            self._active = self._accepted_frame = False
+            self._reported_rejections.clear()
+            if self._publication is not None:
+                self.worker.discard_result(self.policy_version)
+                self._publication = None
+                self.discarded_updates += 1
+                self.last_update = None
+        self.poll()  # Drain obsolete results without waiting for a busy learner.
+
+
     def observe(self, projected_state: torch.Tensor, command: torch.Tensor,
                 evidence: FADAControlEvidence):
         self._check_owner()
@@ -130,6 +161,8 @@ class FADAOnlineCoordinator:
         if evidence.episode_id != self.episode_id:
             raise ValueError("episode changes require coordinator.reset")
         self.poll()
+        if not self.updates_enabled:
+            return None
         if self._collection_start_step is None and evidence.policy_control_active:
             self._collection_start_step = evidence.control_step
         result = self.collector.observe(projected_state, command, evidence)
@@ -153,6 +186,8 @@ class FADAOnlineCoordinator:
         self._check_owner()
         if self._stopping:
             raise FADALearnerError("coordinator is stopping")
+        if not self.updates_enabled:
+            return None
         if evidence.policy_version != self.policy_version:
             self._fail("issued snapshot policy_version does not match applied weights")
         result = self.collector.record_action(snapshot, evidence)
@@ -163,7 +198,7 @@ class FADAOnlineCoordinator:
         self._check_owner()
         update_start = (self._update_start_step if self.runtime.method == "fada"
                         else self._collection_start_step)
-        if (self._stopping or not self._active or not self._accepted_frame
+        if (self._stopping or not self.updates_enabled or not self._active or not self._accepted_frame
                 or update_start is None):
             return None
         collection_step = self._step - update_start
@@ -217,6 +252,11 @@ class FADAOnlineCoordinator:
         if (result.identity.sample_ids != identities or result.identity.generation > self.generation
                 or result.identity.policy_version != self.policy_version):
             self._fail("completed batch does not match coordinator ownership")
+        if not self.updates_enabled or result.identity.generation < self._discard_before_generation:
+            self.worker.discard_result(self.policy_version)
+            self._inflight = ()
+            self.discarded_updates += 1
+            return None
         acknowledged = len(identities)
         if isinstance(self.collector, FADAExpertTrajectoryCollector):
             acknowledged = self.collector.acknowledge(identities)
@@ -234,7 +274,7 @@ class FADAOnlineCoordinator:
     @torch.no_grad()
     def apply_pending_at_step_boundary(self) -> bool:
         self._check_owner()
-        if self._stopping or not self._active or not self._accepted_frame:
+        if self._stopping or not self.updates_enabled or not self._active or not self._accepted_frame:
             return False
         if self.runtime.method == "fada" and self._update_start_step is None:
             return False

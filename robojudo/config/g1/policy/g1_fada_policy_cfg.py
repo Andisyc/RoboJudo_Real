@@ -15,6 +15,7 @@ from .g1_unilab_policy_cfg import G1UniLabDistillDoF, G1UniLabPolicyCfg
 class FADAOnlineAdaptationCfg(Config):
     method: Literal["none", "fada", "expert_difference"] = "none"
     execution_mode: Literal["async", "sync"] = "async"
+    freeze_lora: bool = False
     lora_rank: int = Field(default=8, gt=0, strict=True)
     lora_alpha: float = Field(default=16.0, gt=0.0, allow_inf_nan=False)
     lora_dropout: float = Field(default=0.05, ge=0.0, lt=1.0, allow_inf_nan=False)

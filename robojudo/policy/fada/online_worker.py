@@ -1,6 +1,7 @@
 """One spawn learner, owned byte messages, and no robot/control dependencies."""
 from __future__ import annotations
 
+import copy
 import io
 import math
 import multiprocessing as mp
@@ -122,6 +123,7 @@ class FADAJobIdentity:
 class FADAUpdateJob:
     identity: FADAJobIdentity
     data: bytes
+    learner_base_version: int
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,9 @@ def _learner_main(initial, config, jobs, results, stopping):
             updater = FADAExpertUpdater(runtime, sigma=config["sigma"], **common)
         results.send({"kind": "ready"})
         version = 0
+        parameters = dict(fada_adapter_named_parameters(runtime.policy))
+        device = next(iter(parameters.values())).device
+        rollback = None
         while not stopping.is_set():
             try:
                 job = jobs.get(timeout=0.1)
@@ -153,6 +158,23 @@ def _learner_main(initial, config, jobs, results, stopping):
             if stopping.is_set():
                 break
             started = time.monotonic()
+            if job.learner_base_version != version:
+                if rollback is None or job.learner_base_version != version - 1:
+                    raise ValueError("learner cannot rebase outside its last uncommitted update")
+                adapters_before, optimizer_before, cpu_rng, cuda_rng = rollback
+                with torch.no_grad():
+                    for name, parameter in parameters.items():
+                        parameter.copy_(adapters_before[name])
+                updater.optimizer.load_state_dict(optimizer_before)
+                torch.set_rng_state(cpu_rng)
+                if cuda_rng is not None:
+                    torch.cuda.set_rng_state(cuda_rng, device)
+                version = job.learner_base_version
+            rollback = (
+                {name: parameter.detach().clone() for name, parameter in parameters.items()},
+                copy.deepcopy(updater.optimizer.state_dict()), torch.get_rng_state(),
+                torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
+            )
             samples = _unpack_samples(runtime.method, job.data, config["learner_device"])
             identities = tuple((s.evidence.episode_id, s.evidence.control_step) for s in samples)
             if identities != job.identity.sample_ids or not samples:
@@ -324,7 +346,7 @@ class FADALearnerWorker:
             raise ValueError("batch sample IDs must be unique")
         identity = FADAJobIdentity(self._next_job_id, generation, episode_id, control_step,
                                    policy_version, identities)
-        job = FADAUpdateJob(identity, _dump([_pack_record(s) for s in samples]))
+        job = FADAUpdateJob(identity, _dump([_pack_record(s) for s in samples]), self.learner_version)
         try:
             self._jobs.put_nowait(job)
         except queue.Full:
@@ -348,6 +370,14 @@ class FADALearnerWorker:
             return values
         except Exception as error:
             self._fail(f"invalid learner publication: {error}")
+
+    def discard_result(self, policy_version: int) -> None:
+        """Rebase the next job onto active weights, never an unpublished learner step."""
+        if (self.state != "READY" or self._job is not None
+                or self.learner_version != policy_version + 1):
+            self._fail("only the latest completed, unapplied update can be discarded")
+        self.learner_version = policy_version
+
 
     def poll(self) -> tuple[FADAUpdateResult, dict[str, torch.Tensor]] | None:
         if self.state == "FAILED":

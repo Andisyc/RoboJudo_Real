@@ -23,6 +23,8 @@ class KeyboardCtrlCfg(CtrlCfg):
 
     triggers: dict[str, str] = {
         "Key.esc": "[SHUTDOWN]",
+        "f": "[LORA_FREEZE]",
+        "r": "[LORA_UNFREEZE]",
         # "Key.tab": "[POLICY_TOGGLE]",
         "`": "[SIM_REBORN]",
         "<": "[MOTION_FADE_IN]",  # note: with shift

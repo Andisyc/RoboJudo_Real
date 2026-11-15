@@ -814,8 +814,8 @@ uv run python scripts/run_pipeline.py \
 ```
 Focus the launching terminal after preparation. This profile explicitly selects
 `KeyboardCtrlCfg(backend="terminal")`, including when `DISPLAY` is set. Press `w`
-for 0.4m/s forward motion; `x` zeros velocity without disabling learning after
-the first trigger. Simulation and hardware share the expert method, paired PT,
+for 0.4m/s forward motion; `x` zeros velocity and pauses LoRA updates. Simulation
+and hardware share the expert method, paired PT,
 40-step warmup, ten-sample window, ten-step submission checks and async mode;
 hardware preparation, sensor validation, safety checks and connection settings
 remain hardware-specific and unchanged. Payload flags are simulation-only.
@@ -837,6 +837,30 @@ The flag rejects real-robot and remote-input profiles. Omitting it preserves
 legacy latch behavior. Motion-command zero does not guarantee instantaneous stop.
 Local hold and legacy profiles do not require the standalone `robojudo_keyboard`
 package. Only the opt-in remote controller and remote CLI depend on that package.
+
+### Pause or freeze online LoRA updates
+
+Both FADA and frozen-base trajectory-difference adaptation pause collection,
+submission and actor-weight application when all three task velocity commands
+are exactly zero. This uses the command, not measured robot velocity. Inference
+continues with the current LoRA weights. Moving again resumes with fresh windows;
+standing samples and partial windows are not submitted after resumption.
+
+Add `--freeze-lora` to start with manual freezing enabled. During execution,
+press and release F to freeze or R to unfreeze without restarting. Manual freezing
+wins over motion; unfreezing while standing does not enable learning. The public
+policy method `set_lora_frozen(bool)` provides the same control-thread API.
+Freezing does not save/reload a file, disable the robot, reset inference history
+or reset accepted LoRA/Adam/anchor state. Async results from before the pause are
+discarded, including already staged publications; the next learner job restores
+the discarded step's LoRA, optimizer and RNG state before training. Sync and
+async execution use the same learning gate. `lora_frozen`, `lora_updates_enabled`
+and coordinator `discarded_updates` expose the state. This is not an emergency stop.
+Deploy the CLI, adaptation config, keyboard trigger config, policy adapter,
+coordinator and learner worker together. After loading the updated program,
+freeze/unfreeze is in-process; this feature does not hot-patch an already
+running older program or change the deployed checkpoint file.
+
 
 ### Remote hold-to-move keyboard (isolated echo first)
 

@@ -40,6 +40,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
 
     def __init__(self, cfg_policy, device):
         self.online_coordinator = None
+        self._lora_frozen = bool(cfg_policy.online_adaptation.freeze_lora)
         self._control_active = None
         self._control_step = 0
         self._adaptation_started = False
@@ -184,6 +185,18 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
     def start_online(self):
         if self.online_coordinator is not None:
             self.online_coordinator.start()
+
+    def set_lora_frozen(self, frozen: bool) -> None:
+        """Freeze the current actor version; unfreezing waits for a moving command."""
+        if type(frozen) is not bool:
+            raise TypeError("frozen must be boolean")
+        self._lora_frozen = frozen
+        if frozen and self.online_coordinator is not None:
+            self.online_coordinator.set_updates_enabled(False)
+            self._adaptation_started = False
+            self._pending_collection = False
+        logger.info("[LORA] manual_frozen=%s", frozen)
+
 
     def set_control_active(self, active: bool):
         if self.online_coordinator is None:
@@ -368,6 +381,11 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             raise RuntimeError("previous FADA action has not been confirmed")
         if self.online_coordinator is not None and self._control_active is None:
             raise RuntimeError("online FADA requires a lifecycle-aware single-policy pipeline")
+        commands_control = ctrl_data.get("COMMANDS", [])
+        if "[LORA_FREEZE]" in commands_control:
+            self.set_lora_frozen(True)
+        elif "[LORA_UNFREEZE]" in commands_control:
+            self.set_lora_frozen(False)
         if self.online_coordinator is not None and self._control_active:
             self._pending_sensor = {
                 name: env_data.get(name) for name in (
@@ -378,6 +396,13 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             }
             self._pending_sensor["source"] = env_data.get("source", "hardware")
         commands = self._get_commands(ctrl_data)
+        if self.online_coordinator is not None:
+            enabled = bool(np.any(commands != 0.0)) and not self._lora_frozen
+            if enabled != self.online_coordinator.updates_enabled:
+                self.online_coordinator.set_updates_enabled(enabled)
+                self._adaptation_started = False
+                logger.info("[LORA] updates_enabled=%s standing=%s manual_frozen=%s",
+                            enabled, not bool(np.any(commands != 0.0)), self._lora_frozen)
         policy_gyro = getattr(env_data, "policy_gyro", None)
         policy_gravity = getattr(env_data, "policy_gravity", None)
         if policy_gyro is None or policy_gravity is None:
@@ -421,6 +446,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         self._pending_command = commands.copy()
         return obs, {
             "commands": commands,
+            "lora_frozen": self._lora_frozen,
+            "lora_updates_enabled": self.online_coordinator is not None and self.online_coordinator.updates_enabled,
             "gait_phase": self.gait_phase.copy(),
             "fada_raw_obs_dim": FADA_G1_ACTOR_OBS_DIM,
             "fada_projected_obs_dim": FADA_G1_STATE_DIM,
@@ -441,7 +468,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             if self.online_coordinator is not None and self._control_active:
                 coordinator = self.online_coordinator
                 legacy = coordinator.runtime.method == "fada"
-                if not self._adaptation_started and np.any(self._pending_command != 0.0):
+                if not self._adaptation_started and coordinator.updates_enabled and np.any(self._pending_command != 0.0):
                     self._adaptation_started = True
                     if legacy:
                         coordinator.enable_updates(self._control_step)
@@ -455,7 +482,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                     policy_control_active=True, action_dispatched=False,
                     **self._pending_sensor,
                 )
-                collect = legacy or self._adaptation_started
+                collect = coordinator.updates_enabled
                 if collect:
                     coordinator.observe(histories[0][:, -1], histories[2], evidence)
                     coordinator.apply_pending_at_step_boundary()

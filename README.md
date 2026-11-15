@@ -835,6 +835,8 @@ keys cancel. No F8 or Space is required in this local mode. Do not unset DISPLAY
 or use the SSH terminal backend. The listener is global to the local desktop.
 The flag rejects real-robot and remote-input profiles. Omitting it preserves
 legacy latch behavior. Motion-command zero does not guarantee instantaneous stop.
+Local hold and legacy profiles do not require the standalone `robojudo_keyboard`
+package. Only the opt-in remote controller and remote CLI depend on that package.
 
 ### Remote hold-to-move keyboard (isolated echo first)
 

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from robojudo_keyboard import KEY_AXES, velocity_command
 
 from robojudo.policy import policy_registry
 
@@ -28,6 +27,11 @@ from .fada.online_runtime import prepare_fada_trainable_runtime
 from .unilab_policy import UniLabPolicy
 
 logger = logging.getLogger(__name__)
+
+KEY_AXES = {
+    "w": (0, 1), "s": (0, -1), "a": (1, 1),
+    "d": (1, -1), "q": (2, 1), "e": (2, -1),
+}
 
 
 @policy_registry.register
@@ -283,22 +287,26 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         if self.gait_phase_enabled:
             super().post_step_callback(commands)
 
-    def _get_commands(self, ctrl_data) -> np.ndarray:
-        """Use expiring remote held state, or legacy latched keyboard commands.
+    def _command_from_held_keys(self, keys) -> np.ndarray:
+        self._keyboard_command.fill(0.0)
+        for key in keys:
+            axis, sign = KEY_AXES[key]
+            self._keyboard_command[axis] += sign * self.keyboard_command_magnitudes[axis]
+        return self._keyboard_command.copy()
 
-        RoboJuDo keyboard input is delivered as press/release events.  A key
+    def _get_commands(self, ctrl_data) -> np.ndarray:
+        """Build remote, local held, or legacy latched velocity commands.
+
+        Legacy keyboard input is delivered as press/release events. A key
         press sets its axis to the corresponding trained command magnitude;
         release events do not stop motion because an SSH terminal cannot track
         key holds.  The x key clears all three command axes.
         """
         remote = ctrl_data.get("RemoteKeyboardCtrl")
         if remote is not None:
-            command = velocity_command(
+            return self._command_from_held_keys(
                 remote["keys"] if remote["fresh"] and remote["armed"] else (),
-                self.keyboard_command_magnitudes,
             )
-            self._keyboard_command = np.asarray(command, dtype=np.float32)
-            return self._keyboard_command.copy()
         keyboard_data = ctrl_data.get("KeyboardCtrl")
         if keyboard_data is None:
             return super()._get_commands(ctrl_data)
@@ -319,9 +327,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                 if not self._held_motion_keys:
                     self._keyboard_hold_blocked = False
             else:
-                self._keyboard_command = np.asarray(
-                    velocity_command(self._held_motion_keys, self.keyboard_command_magnitudes), dtype=np.float32,
-                )
+                return self._command_from_held_keys(self._held_motion_keys)
             return self._keyboard_command.copy()
 
         key_axes = KEY_AXES

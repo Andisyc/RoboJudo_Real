@@ -64,6 +64,7 @@ class G1FADAPlannerIDMPolicyCfg(G1UniLabPolicyCfg):
     # Forward uses the curriculum's walking command; lateral and yaw use the
     # source task limits.
     keyboard_command_magnitudes: list[float] = [0.6, 0.4, 0.8]
+    keyboard_command_mode: Literal["latch", "hold"] = "latch"
     # v022 inherits the FADA distill MuJoCo control contract, which maps raw
     # action chunks directly to joint-position offsets.
     execution_action_scale: float = 1.0

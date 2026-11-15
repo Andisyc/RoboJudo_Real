@@ -12,6 +12,7 @@ import time
 
 import robojudo.pipeline
 from robojudo.config.config_manager import ConfigManager
+from robojudo.controller.ctrl_cfgs import KeyboardCtrlCfg
 from robojudo.pipeline.pipeline_cfgs import RlPipelineCfg
 from robojudo.pipeline.rl_pipeline import RlPipeline
 
@@ -36,6 +37,10 @@ def parse_args():
         "--left-shoulder-load-delay-s", type=float, default=None,
         help="Simulation seconds after the first forward command before loading (default: 30; 0: immediate).",
     )
+    parser.add_argument(
+        "--keyboard-hold", action="store_true",
+        help="FADA MuJoCo only: local desktop keyboard, release motion keys to zero their axes",
+    )
     
     args = parser.parse_args()
     if args.left_shoulder_load_delay_s is not None and not args.left_shoulder_load:
@@ -50,6 +55,14 @@ def main():
     # get cfg from register (Import-Time Registry)
     config_manager = ConfigManager(config_name=args.config)
     cfg: RlPipelineCfg = config_manager.get_cfg()
+    if args.keyboard_hold:
+        if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
+                or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):
+            raise ValueError("--keyboard-hold requires FADA MuJoCo simulation, never a real-robot profile")
+        if len(cfg.ctrl) != 1 or not isinstance(cfg.ctrl[0], KeyboardCtrlCfg):
+            raise ValueError("--keyboard-hold requires a single KeyboardCtrl")
+        cfg.ctrl = [cfg.ctrl[0].model_copy(update={"backend": "pynput"})]
+        cfg.policy.keyboard_command_mode = "hold"
     if args.left_shoulder_load:
         if (cfg.env.env_type != "MujocoEnv" or not cfg.env.is_sim
                 or cfg.robot != "g1" or cfg.policy.policy_type != "FADAPlannerIDMPolicyAdapter"):

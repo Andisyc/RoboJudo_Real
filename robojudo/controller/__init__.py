@@ -30,6 +30,7 @@ def __getattr__(name: str) -> type[Controller]:
 ctrl_registry.add("JoystickCtrl", ".joystick_ctrl")
 ctrl_registry.add("UnitreeCtrl", ".unitree_ctrl")
 ctrl_registry.add("KeyboardCtrl", ".keyboard_ctrl")
+ctrl_registry.add("RemoteKeyboardCtrl", ".remote_keyboard_ctrl")
 ctrl_registry.add("BeyondMimicCtrl", ".beyondmimic_ctrl")
 ctrl_registry.add("MotionCtrl", ".motion_ctrl")
 ctrl_registry.add("MotionH2HCtrl", ".motion_h2h_ctrl")

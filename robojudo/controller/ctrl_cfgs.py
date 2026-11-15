@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Literal
+from pydantic import Field
 
 from robojudo.config import ASSETS_DIR, Config
 
@@ -30,6 +31,12 @@ class KeyboardCtrlCfg(CtrlCfg):
         "{": "[MOTION_LOAD_PREV]",  # note: with shift
         "}": "[MOTION_LOAD_NEXT]",  # note: with shift
     }
+
+
+class RemoteKeyboardCtrlCfg(CtrlCfg):
+    ctrl_type: str = "RemoteKeyboardCtrl"
+    port: int = Field(default=8765, ge=1, le=65535, strict=True)
+    timeout_s: float = Field(default=0.3, gt=0.0, allow_inf_nan=False)
 
 
 class JoystickCtrlCfg(CtrlCfg):

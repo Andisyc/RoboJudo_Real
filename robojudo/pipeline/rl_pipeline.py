@@ -260,6 +260,12 @@ class RlPipeline(Pipeline):
         except BaseException as error:
             errors.append(error)
         try:
+            manager = getattr(self, "ctrl_manager", None)
+            if manager is not None:
+                manager.close()
+        except BaseException as error:
+            errors.append(error)
+        try:
             if self._fada_adapter is not None:
                 self._fada_adapter.close()
         except BaseException as error:

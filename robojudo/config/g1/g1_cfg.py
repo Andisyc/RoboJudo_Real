@@ -5,6 +5,7 @@ from robojudo.config import cfg_registry
 from robojudo.controller.ctrl_cfgs import (
     JoystickCtrlCfg,  # noqa: F401
     KeyboardCtrlCfg,  # noqa: F401
+    RemoteKeyboardCtrlCfg,
     UnitreeCtrlCfg,)  # noqa: F401
 
 from robojudo.pipeline.pipeline_cfgs import (
@@ -252,6 +253,24 @@ class g1_real_fada_expert_online(g1_real_fada_planner_idm):
 
     ctrl: List[KeyboardCtrlCfg] = [KeyboardCtrlCfg(backend="terminal")]
     policy: G1FADAPlannerIDMPolicyCfg = _fada_comparison_policy("expert_difference", forward_speed=0.4)
+
+
+@cfg_registry.register
+class g1_fada_expert_online_remote(g1_fada_expert_online_async):
+    """Remote hold-to-move input in paced simulation; terminal retains safety triggers."""
+
+    ctrl: List[Union[RemoteKeyboardCtrlCfg, KeyboardCtrlCfg]] = [
+        RemoteKeyboardCtrlCfg(), KeyboardCtrlCfg(backend="terminal"),
+    ]
+
+
+@cfg_registry.register
+class g1_real_fada_expert_online_remote(g1_real_fada_expert_online):
+    """Opt-in remote input; this profile creates a real robot controller when run."""
+
+    ctrl: List[Union[RemoteKeyboardCtrlCfg, KeyboardCtrlCfg]] = [
+        RemoteKeyboardCtrlCfg(), KeyboardCtrlCfg(backend="terminal"),
+    ]
 
 
 @cfg_registry.register

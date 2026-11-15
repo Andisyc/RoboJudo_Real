@@ -820,6 +820,62 @@ the first trigger. Simulation and hardware share the expert method, paired PT,
 hardware preparation, sensor validation, safety checks and connection settings
 remain hardware-specific and unchanged. Payload flags are simulation-only.
 
+### Local desktop keyboard hold mode (simulation only)
+
+When operating directly at the server's graphical desktop, add `--keyboard-hold`
+to the existing FADA MuJoCo command. It selects native `pynput` press/release
+events and held-key command mapping, without Mac networking:
+```bash
+python scripts/run_pipeline.py -c g1_fada_online --keyboard-hold \
+  --left-shoulder-load --left-shoulder-load-delay-s 30
+```
+Hold W/S, A/D or Q/E to command their axes; release a key to cancel its axis.
+X zeros all axes and inhibits held keys until they have been released; opposite
+keys cancel. No F8 or Space is required in this local mode. Do not unset DISPLAY
+or use the SSH terminal backend. The listener is global to the local desktop.
+The flag rejects real-robot and remote-input profiles. Omitting it preserves
+legacy latch behavior. Motion-command zero does not guarantee instantaneous stop.
+
+### Remote hold-to-move keyboard (isolated echo first)
+
+The standalone `robojudo_keyboard` package imports no policy, environment,
+Unitree SDK or DDS. Its receiver listens only on localhost; use SSH forwarding.
+Copy the new package to the server before this input-only check. Do not run
+`start.sh` or a real-robot profile for the check.
+
+Server, from the repository directory:
+```bash
+uv run --no-project --no-sync python -m robojudo_keyboard echo --port 8765 --timeout-s 0.3
+```
+Mac, separate terminal (forwarding only, not the robot controller):
+```bash
+ssh -N -o ExitOnForwardFailure=yes -L 8765:127.0.0.1:8765 wjzh@10.24.88.193
+```
+Mac, from the repository directory in another terminal:
+```bash
+uv run --no-project --with pynput python -m robojudo_keyboard client --port 8765
+```
+Grant the terminal macOS Accessibility/Input Monitoring permission if requested.
+F8 arms/disarms only after all motion keys and Space are released. Hold Space
+and W/S, A/D or Q/E for forward/backward, left/right or left/right yaw commands;
+opposing keys cancel. Releasing Space cancels all movement; releasing a motion
+key cancels only its axis. X disarms and Esc requests shutdown. The listener is
+global: do not type into other applications while armed with Space held.
+Input loss, expired challenges, malformed data or disconnection cancel the lease.
+Restart the client and re-arm after disconnect. Delayed packets cannot renew a
+lease merely by arriving. The configurable 0.3 s timeout is not a certified
+physical stop-time guarantee. Echo shutdown only exits the echo process.
+
+Opt-in profiles `g1_fada_expert_online_remote` (paced simulation) and
+`g1_real_fada_expert_online_remote` retain terminal safety triggers. Terminal
+movement keys do not override remote velocity. Old profiles remain unchanged.
+Normal release does not reset the policy, LoRA or optimizer. Pipeline cleanup
+closes the receiver. **Do not launch the real profile as an input test:** its
+environment constructor can release the existing robot motion mode. Before
+live use, verify deployed DDS interface/XML, native command-age protection,
+physical emergency stop and actual zero-command behavior. This change does
+not add or certify a motor-command watchdog. Zero velocity is not zero torque.
+
 
 Hardware profile selection uses `-c/--config`; dotted Hydra overrides or a
 `--fada-method` argument are not supported. These remain keyboard profiles.

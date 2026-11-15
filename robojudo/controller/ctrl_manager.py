@@ -43,6 +43,21 @@ class CtrlManager:
         for controller in self.controllers.values():
             controller.inst.reset()
 
+    def close(self):
+        """Close input resources even when another controller's cleanup fails."""
+        first_error = None
+        for controller in self.controllers.values():
+            close = getattr(controller.inst, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except BaseException as error:
+                    logger.exception("Controller cleanup failed")
+                    if first_error is None:
+                        first_error = error
+        if first_error is not None:
+            raise first_error
+
     def post_step_callback(self, ctrl_data: Box): # Call post step callback for all controllers.
         # self.process_triggers()
         commands = ctrl_data.get("COMMANDS", [])

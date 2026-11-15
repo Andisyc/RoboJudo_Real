@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from robojudo_keyboard import KEY_AXES, velocity_command
 
 from robojudo.policy import policy_registry
 
@@ -62,6 +63,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             raise ValueError(
                 "FADA keyboard_command_magnitudes must contain three positive values"
             )
+        self.keyboard_command_mode = cfg_policy.keyboard_command_mode
+        self._keyboard_hold_blocked = False
         self._held_motion_keys: set[str] = set()
         self._keyboard_command = np.zeros(3, dtype=np.float32)
         self.playback_controller = FADAPlaybackController(
@@ -155,6 +158,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         if hasattr(self, "_held_motion_keys"):
             self._held_motion_keys.clear()
             self._keyboard_command.fill(0.0)
+            self._keyboard_hold_blocked = False
         if hasattr(self, "gait_phase_enabled") and not self.gait_phase_enabled:
             self.gait_phase = self.fixed_gait_phase.copy()
         if hasattr(self, "playback_controller"):
@@ -238,6 +242,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             {
                 "held_motion_keys": set(self._held_motion_keys),
                 "keyboard_command": self._keyboard_command.copy(),
+                "keyboard_hold_blocked": self._keyboard_hold_blocked,
                 "pending_command": (
                     None if self._pending_command is None else self._pending_command.copy()
                 ),
@@ -256,6 +261,7 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             raise RuntimeError("cannot rewind an active online physical history")
         super().restore_state(state)  # type: ignore[arg-type]
         self._held_motion_keys = set(state["held_motion_keys"])  # type: ignore[arg-type]
+        self._keyboard_hold_blocked = bool(state["keyboard_hold_blocked"])
         self._keyboard_command = np.asarray(
             state["keyboard_command"], dtype=np.float32
         ).copy()
@@ -278,22 +284,47 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             super().post_step_callback(commands)
 
     def _get_commands(self, ctrl_data) -> np.ndarray:
-        """Return persistent, in-distribution physical velocity commands.
+        """Use expiring remote held state, or legacy latched keyboard commands.
 
         RoboJuDo keyboard input is delivered as press/release events.  A key
         press sets its axis to the corresponding trained command magnitude;
         release events do not stop motion because an SSH terminal cannot track
         key holds.  The x key clears all three command axes.
         """
+        remote = ctrl_data.get("RemoteKeyboardCtrl")
+        if remote is not None:
+            command = velocity_command(
+                remote["keys"] if remote["fresh"] and remote["armed"] else (),
+                self.keyboard_command_magnitudes,
+            )
+            self._keyboard_command = np.asarray(command, dtype=np.float32)
+            return self._keyboard_command.copy()
         keyboard_data = ctrl_data.get("KeyboardCtrl")
         if keyboard_data is None:
             return super()._get_commands(ctrl_data)
+        if getattr(self, "keyboard_command_mode", "latch") == "hold":
+            for event in keyboard_data.get("keyboard_event", []):
+                if event.get("type") != "keyboard":
+                    continue
+                key = event.get("name")
+                if key in KEY_AXES:
+                    if event.get("pressed", False):
+                        self._held_motion_keys.add(key)
+                    else:
+                        self._held_motion_keys.discard(key)
+                elif key == "x" and event.get("pressed", False):
+                    self._keyboard_hold_blocked = True
+            if self._keyboard_hold_blocked:
+                self._keyboard_command.fill(0.0)
+                if not self._held_motion_keys:
+                    self._keyboard_hold_blocked = False
+            else:
+                self._keyboard_command = np.asarray(
+                    velocity_command(self._held_motion_keys, self.keyboard_command_magnitudes), dtype=np.float32,
+                )
+            return self._keyboard_command.copy()
 
-        key_axes: dict[str, tuple[int, float]] = {
-            "w": (0, 1.0), "s": (0, -1.0),
-            "a": (1, 1.0), "d": (1, -1.0),
-            "q": (2, 1.0), "e": (2, -1.0),
-        }
+        key_axes = KEY_AXES
         for event in keyboard_data.get("keyboard_event", []):
             if event.get("type") != "keyboard":
                 continue

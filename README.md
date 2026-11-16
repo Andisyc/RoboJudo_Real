@@ -882,6 +882,18 @@ coordinator and learner worker together. After loading the updated program,
 freeze/unfreeze is in-process; this feature does not hot-patch an already
 running older program or change the deployed checkpoint file.
 
+For a local keyboard update burst, start with `--freeze-lora`, then press and
+release U to allow `online_adaptation.burst_updates` successful weight
+applications (default 5), followed by automatic freezing. Warmup, sample
+collection and discarded jobs do not count. Jobs accepted before U are excluded.
+`[LORA WINDOW] applied=5/5 state=frozen` confirms completion; the fifth set of
+weights remains active and movement continues. This bounds learning, not safety.
+Repeated U during an unfinished burst does not extend it. Zero velocity pauses
+the burst without resetting its remaining budget. F cancels and freezes; R
+cancels the budget and resumes continuous learning. An accepted Z restart or
+a control reset cancels a burst and leaves it frozen. These controls apply to
+both local online methods, in simulation and on hardware, not remote profiles.
+
 On either local online FADA profile, press X to zero the velocity command, wait
 until the robot is stable, then press and release Z to restart adaptation.
 Wait for `[LORA RESTART] complete` before pressing W or P again. Z restores the

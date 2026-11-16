@@ -1288,6 +1288,174 @@ class TestFADAOnlineWorker(unittest.TestCase):
             with self.subTest(method=method):
                 self.exercise_real_method(method)
 
+    def test_local_update_window_freezes_after_five_publications(self):
+        from robojudo.policy.fada.playback import FADAPlaybackController
+
+        class Frame(SimpleNamespace):
+            def get(self, name, default=None):
+                return getattr(self, name, default)
+
+        for method, mode in (("fada", "async"), ("expert_difference", "async"), ("fada", "sync")):
+            with self.subTest(method=method, mode=mode):
+                runtime, cfg = self.prepared(method, execution_mode=mode, freeze_lora=True)
+                coordinator = FADAOnlineCoordinator(runtime, cfg)
+                adapter = object.__new__(FADAPlannerIDMPolicyAdapter)
+                adapter.online_coordinator = coordinator
+                adapter.cfg_policy = SimpleNamespace(online_adaptation=cfg)
+                adapter._runtime = {"runner": runtime}
+                adapter._lora_frozen = True
+                adapter._control_active = True
+                adapter._stopping = adapter._adaptation_started = adapter._pending_collection = False
+                adapter._control_step = 0
+                adapter._pending_snapshot = adapter._pending_evidence = adapter._pending_sensor = None
+                adapter._pending_observation = adapter._pending_command = None
+                adapter._last_submitted_moving = None
+                adapter._issued_moving = adapter._restart_motion_blocked = False
+                adapter.keyboard_command_mode = "hardware_hold"
+                adapter.keyboard_command_magnitudes = np.array([0.4, 0.4, 0.8], dtype=np.float32)
+                adapter._keyboard_command = np.zeros(3, dtype=np.float32)
+                adapter._held_motion_keys = set()
+                adapter._preset_command = np.array([0.3, 0., 0.2], dtype=np.float32)
+                adapter._preset_active = adapter._preset_key_down = adapter._preset_wait_release = False
+                adapter.default_dof_pos = np.zeros(29, dtype=np.float32)
+                adapter.last_action = np.zeros(29, dtype=np.float32)
+                adapter.gait_phase = np.array([0., np.pi], dtype=np.float32)
+                adapter.execution_action_scale = 1.0
+                adapter.num_actions = 29
+                adapter.playback_controller = FADAPlaybackController(
+                    runtime, device="cpu", history_length=30,
+                    observation_contract="g1_fada_state_v2", action_dim=29, command_dim=3,
+                )
+                context = coordinator.worker._context
+                entered, release = context.Event(), context.Event()
+                if mode == "sync":
+                    release.set()
+                target = functools.partial(_controlled_fada_learner, entered=entered, release=release)
+                tick = 0
+                jobs = []
+                submit = coordinator.worker.submit
+
+                def record_job(samples, **identity):
+                    job = submit(samples, **identity)
+                    if job is not None:
+                        jobs.append(job)
+                    return job
+
+                def frame(*events, commands=()):
+                    nonlocal tick
+                    data = Frame(
+                        policy_gyro=np.zeros(3, dtype=np.float32),
+                        policy_gravity=np.array([0., 0., -1.], dtype=np.float32),
+                        dof_pos=0.01 * np.sin(tick * 0.1 + np.arange(29, dtype=np.float32)),
+                        dof_vel=np.zeros(29, dtype=np.float32), source="hardware",
+                        sensor_tick=tick, torso_imu_sequence=tick + 1,
+                        lowstate_age_s=0.001, torso_imu_age_s=0.001,
+                        sensor_read_started_ns=1_000_000_000 + tick * 20_000_000,
+                    )
+                    obs, extras = adapter.get_observation(data, {
+                        "KeyboardCtrl": {"keyboard_event": [
+                            {"type": "keyboard", "name": key, "pressed": pressed}
+                            for key, pressed in events
+                        ]}, "COMMANDS": list(commands),
+                    })
+                    adapter.get_action(obs)
+                    adapter.confirm_action_submission(data.sensor_read_started_ns + 1_000_000)
+                    tick += 1
+                    return extras["commands"]
+
+                def advance_until(predicate):
+                    for _ in range(500):
+                        if predicate():
+                            return
+                        if mode == "async" and coordinator.worker.pending_job is not None:
+                            self.assertTrue(coordinator.worker.wait_for_message(5))
+                        frame()
+                    self.fail("bounded update scenario did not reach its expected state")
+
+                try:
+                    with patch("robojudo.policy.fada.online_worker._learner_main", target):
+                        adapter.start_online()
+                    before = {n: p.detach().clone() for n, p in fada_adapter_named_parameters(runtime.policy)}
+                    with patch.object(coordinator.worker, "submit", side_effect=record_job):
+                        frame(("p", True))
+                        frame(("p", False))
+                        self.assertEqual(coordinator.policy_version, 0)
+                        self.assertIsNone(coordinator.worker.pending_job)
+                        if mode == "async":
+                            frame(commands=("[LORA_UNFREEZE]",))
+                            for _ in range(60):
+                                if coordinator.worker.pending_job is not None:
+                                    break
+                                frame()
+                            self.assertTrue(entered.wait(5))
+                            old = coordinator.worker.pending_job
+                            self.assertIsNotNone(old)
+                        frame(commands=("[LORA_UPDATE_WINDOW]",))
+                        generation = coordinator.generation
+                        frame(commands=("[LORA_UPDATE_WINDOW]",))
+                        self.assertEqual(coordinator.generation, generation)
+                        self.assertEqual(coordinator.update_window_applied, 0)
+                        release.set()
+                        advance_until(lambda: coordinator.update_window_complete)
+                        self.assertEqual(coordinator.update_window_applied, 5)
+                        self.assertEqual(coordinator.policy_version, 5)
+                        self.assertEqual(len(jobs), 6 if mode == "async" else 5)
+                        self.assertEqual(coordinator.discarded_updates, 1 if mode == "async" else 0)
+                        self.assertTrue(adapter._lora_frozen)
+                        self.assertFalse(coordinator.updates_enabled)
+                        self.assertIsNone(coordinator.worker.pending_job)
+                        self.assertTrue(any(not torch.equal(p, before[n])
+                                            for n, p in fada_adapter_named_parameters(runtime.policy)))
+                        weights = {n: p.detach().clone() for n, p in fada_adapter_named_parameters(runtime.policy)}
+                        count = len(jobs)
+                        for _ in range(25):
+                            np.testing.assert_allclose(frame(), [0.3, 0, 0.2])
+                        self.assertEqual((coordinator.policy_version, len(jobs)), (5, count))
+                        for n, p in fada_adapter_named_parameters(runtime.policy):
+                            torch.testing.assert_close(p, weights[n], rtol=0, atol=0)
+
+                        frame(commands=("[LORA_UPDATE_WINDOW]",))
+                        frame(("x", True))
+                        for _ in range(10):
+                            frame()
+                        self.assertEqual(coordinator.update_window_limit, 5)
+                        self.assertEqual(coordinator.update_window_applied, 0)
+                        frame(("p", True))
+                        frame(("p", False))
+                        advance_until(lambda: coordinator.update_window_applied == 1)
+                        frame(commands=("[LORA_FREEZE]", "[LORA_UNFREEZE]", "[LORA_UPDATE_WINDOW]"))
+                        self.assertTrue(adapter._lora_frozen)
+                        self.assertIsNone(coordinator.update_window_limit)
+                        version = coordinator.policy_version
+                        frame(commands=("[LORA_UNFREEZE]", "[LORA_UPDATE_WINDOW]"))
+                        self.assertFalse(adapter._lora_frozen)
+                        self.assertIsNone(coordinator.update_window_limit)
+                        advance_until(lambda: coordinator.policy_version >= version + 6)
+
+                        frame(("x", True))
+                        frame()
+                        frame(commands=("[LORA_UPDATE_WINDOW]",))
+                        frame(commands=("[LORA_RESTART]",))
+                        self.assertIsNone(coordinator.update_window_limit)
+                        self.assertTrue(adapter._lora_frozen)
+                        frame(commands=("[LORA_UPDATE_WINDOW]",))
+                        self.assertIsNone(coordinator.update_window_limit)
+                        for _ in range(4):
+                            if not coordinator.restart_pending:
+                                break
+                            self.assertTrue(coordinator.worker.wait_for_message(5))
+                            frame()
+                        self.assertFalse(coordinator.restart_pending)
+                        frame(commands=("[LORA_UPDATE_WINDOW]",))
+                        adapter.set_control_active(False)
+                        self.assertIsNone(coordinator.update_window_limit)
+                        self.assertTrue(adapter._lora_frozen)
+                        adapter.start_lora_update_window({"KeyboardCtrl": {}})
+                        self.assertIsNone(coordinator.update_window_limit)
+                finally:
+                    release.set()
+                    adapter.close()
+
     def test_lora_restart_discards_inflight_and_relearns_from_cold_state(self):
         for method in ("fada", "expert_difference"):
             with self.subTest(method=method):

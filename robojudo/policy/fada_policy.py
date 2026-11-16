@@ -196,6 +196,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         self._adaptation_started = False
         self._pending_collection = False
         if self.online_coordinator is not None:
+            if self.online_coordinator.update_window_limit is not None:
+                self.set_lora_frozen(True)
             self.online_coordinator.reset()
             self._control_active = False
 
@@ -207,12 +209,32 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
         """Freeze the current actor version; unfreezing waits for a moving command."""
         if type(frozen) is not bool:
             raise TypeError("frozen must be boolean")
+        if self.online_coordinator is not None:
+            self.online_coordinator.cancel_update_window()
         self._lora_frozen = frozen
         if frozen and self.online_coordinator is not None:
             self.online_coordinator.set_updates_enabled(False)
             self._adaptation_started = False
             self._pending_collection = False
-        logger.info("[LORA] manual_frozen=%s", frozen)
+        logger.info("[LORA] manual_frozen=%s mode=%s", frozen, "frozen" if frozen else "continuous")
+
+    def start_lora_update_window(self, ctrl_data) -> None:
+        coordinator = self.online_coordinator
+        if (coordinator is None or not self._control_active or self._stopping
+                or coordinator.restart_pending or ctrl_data.get("KeyboardCtrl") is None
+                or ctrl_data.get("RemoteKeyboardCtrl") is not None):
+            logger.warning("[LORA WINDOW] rejected: requires local active online control without restart")
+            return
+        if coordinator.start_update_window(self.cfg_policy.online_adaptation.burst_updates):
+            self._lora_frozen = False
+            self._adaptation_started = False
+            self._pending_collection = False
+
+    def _sync_lora_window_freeze(self) -> None:
+        if self.online_coordinator.update_window_complete:
+            self._lora_frozen = True
+            self._adaptation_started = False
+            self._pending_collection = False
 
 
     def set_control_active(self, active: bool):
@@ -223,6 +245,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             return
         if self._stopping:
             raise RuntimeError("FADA control has stopped")
+        if not active and self.online_coordinator.update_window_limit is not None:
+            self.set_lora_frozen(True)
         if active and self.online_coordinator.worker.state not in ("READY", "BUSY"):
             raise RuntimeError("online FADA learner is not ready for active control")
         if bool(active) != self._control_active:
@@ -467,12 +491,15 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                 coordinator.advance_restart_at_step_boundary()
             return commands
         commands = self._get_commands(ctrl_data)
+        had_window = coordinator.update_window_limit is not None
         if "[LORA_RESTART]" in ctrl_data.get("COMMANDS", []):
             if (keyboard is None or ctrl_data.get("RemoteKeyboardCtrl") is not None
                     or not self._control_active or self._last_submitted_moving is not False
                     or np.any(commands != 0.0)):
                 logger.warning("[LORA RESTART] rejected: requires local active control and zero current and previous velocity commands")
             elif coordinator.request_adaptation_restart():
+                if had_window:
+                    self._lora_frozen = True
                 self._adaptation_started = False
                 self._cancel_preset()
                 coordinator.advance_restart_at_step_boundary()
@@ -490,6 +517,8 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
             self.set_lora_frozen(True)
         elif "[LORA_UNFREEZE]" in commands_control:
             self.set_lora_frozen(False)
+        elif "[LORA_UPDATE_WINDOW]" in commands_control:
+            self.start_lora_update_window(ctrl_data)
         if self.online_coordinator is not None and self._control_active:
             self._pending_sensor = {
                 name: env_data.get(name) for name in (
@@ -591,14 +620,16 @@ class FADAPlannerIDMPolicyAdapter(UniLabPolicy):
                 if collect:
                     coordinator.observe(histories[0][:, -1], histories[2], evidence)
                     coordinator.apply_pending_at_step_boundary()
+                    self._sync_lora_window_freeze()
                     if self._adaptation_started:
                         coordinator.try_submit()
+                    self._sync_lora_window_freeze()
                 else:
                     coordinator.poll()
                 snapshot = coordinator.runtime.infer_with_snapshot(*histories)
                 self._pending_snapshot = snapshot
                 self._pending_evidence = replace(evidence, policy_version=coordinator.policy_version)
-                self._pending_collection = collect
+                self._pending_collection = coordinator.updates_enabled
                 action_tensor = snapshot.action_snapshot
             else:
                 action_tensor = self._runtime["runner"].infer(*histories)

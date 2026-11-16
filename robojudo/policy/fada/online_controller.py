@@ -52,6 +52,8 @@ class FADAOnlineCoordinator:
         self.generation = 0
         self.policy_version = 0
         self.updates_enabled = not config.freeze_lora
+        self.update_window_limit: int | None = None
+        self.update_window_applied = 0
         self._discard_before_generation = 0
         self.discarded_updates = 0
         self.collector.reset(episode_id=self.episode_id)
@@ -69,6 +71,30 @@ class FADAOnlineCoordinator:
         self.failure: str | None = None
         self.last_update: dict | None = None
         self._reported_rejections: set[tuple[str, str | None]] = set()
+
+    @property
+    def update_window_complete(self) -> bool:
+        return self.update_window_limit is not None and self.update_window_applied >= self.update_window_limit
+
+    def start_update_window(self, limit: int) -> bool:
+        self._check_owner()
+        if isinstance(limit, bool) or not isinstance(limit, Integral) or limit <= 0:
+            raise ValueError("LoRA update window requires a positive integer limit")
+        if self._stopping or self.restart_pending:
+            return False
+        if self.update_window_limit is not None and not self.update_window_complete:
+            return False
+        # Exclude earlier jobs/publications without waiting for a busy learner.
+        self.set_updates_enabled(False)
+        self.update_window_limit = int(limit)
+        self.update_window_applied = 0
+        logger.info("[LORA WINDOW] started limit=%d", limit)
+        return True
+
+    def cancel_update_window(self) -> None:
+        self._check_owner()
+        self.update_window_limit = None
+        self.update_window_applied = 0
 
     @property
     def restart_pending(self) -> bool:
@@ -158,6 +184,9 @@ class FADAOnlineCoordinator:
             "publication_pending": self._publication is not None,
             "updates_enabled": self.updates_enabled, "discarded_updates": self.discarded_updates,
             "last_update": self.last_update,
+            "update_window_limit": self.update_window_limit,
+            "update_window_applied": self.update_window_applied,
+            "update_window_complete": self.update_window_complete,
         }
 
     def start(self) -> None:
@@ -187,6 +216,8 @@ class FADAOnlineCoordinator:
             raise FADALearnerError("coordinator is stopping")
         if enabled and self.restart_pending:
             raise FADALearnerError("cannot enable learning during a LoRA restart")
+        if enabled and self.update_window_complete:
+            raise FADALearnerError("completed LoRA window requires U or R before further learning")
         if enabled == self.updates_enabled:
             return
         self.updates_enabled = enabled
@@ -361,6 +392,16 @@ class FADAOnlineCoordinator:
             self.policy_version, self._step, len(result.identity.sample_ids),
             result.stats["loss"], result.duration_s,
         )
+        if self.update_window_limit is not None:
+            self.update_window_applied += 1
+            complete = self.update_window_complete
+            if complete:
+                self.set_updates_enabled(False)
+            logger.info(
+                "[LORA WINDOW] applied=%d/%d state=%s version=%d",
+                self.update_window_applied, self.update_window_limit,
+                "frozen" if complete else "updating", self.policy_version,
+            )
         return True
 
     def reset(self, *, episode_id: int | None = None) -> None:
@@ -370,6 +411,7 @@ class FADAOnlineCoordinator:
         new_episode = self.episode_id + 1 if episode_id is None else episode_id
         if isinstance(new_episode, bool) or not isinstance(new_episode, Integral) or new_episode <= self.episode_id:
             raise ValueError("reset requires a strictly increasing episode_id")
+        self.cancel_update_window()
         self.episode_id = int(new_episode)
         self.generation += 1
         self.collector.reset(episode_id=self.episode_id)
@@ -384,6 +426,8 @@ class FADAOnlineCoordinator:
         # Keep accepted jobs, staged results and the worker's optimizer/anchor.
 
     def request_stop(self) -> None:
+        self.update_window_limit = None
+        self.update_window_applied = 0
         self._stopping = True
         self._active = False
         self._publication = None

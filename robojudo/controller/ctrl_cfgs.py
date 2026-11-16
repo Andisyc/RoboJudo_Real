@@ -27,6 +27,7 @@ class KeyboardCtrlCfg(CtrlCfg):
         "f": "[LORA_FREEZE]",
         "r": "[LORA_UNFREEZE]",
         "z": "[LORA_RESTART]",
+        "u": "[LORA_UPDATE_WINDOW]",
         # "Key.tab": "[POLICY_TOGGLE]",
         "`": "[SIM_REBORN]",
         "<": "[MOTION_FADE_IN]",  # note: with shift

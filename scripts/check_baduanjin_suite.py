@@ -14,7 +14,7 @@ from robojudo.pipeline.rl_pipeline import PolicyWrapper
 from robojudo.pipeline.g1_baduanjin_suite_pipeline import validate_blend_policies
 
 MODELS = [
-    ("cut1_leftsmall_i80_20261112", 8627, "5558dfe97ecf0e0b7057793fba4cfc08493b3d089690d930054783b992054ebd"),
+    ("cut1_closefeet_i100_20261116", 8627, "f3ac692251021aea8e3769e51b8f30f4407963d2476061bf7a04d853800a47fa"),
     ("eight_cut_2_v010_1.2x", 5960, "bbca0a34feab8f9f73f150003910190cfe9412ef91b4a00f0b65197a2a0312bc"),
     ("cut3_jointv1_pitch8_rightless_20261112", 5299, "70a509a3082737909a2ca1d02680a68122bba098bd3b7b0cacb42d76d6212e3e"),
 ]

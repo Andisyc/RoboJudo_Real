@@ -1,12 +1,12 @@
 请从 https://github.com/Andisyc/RoboJudo_Real 的 **g1loco** 分支拉取最新代码，在此前测试的 **23DoF 背包机器人**部署并测试三段联播。模型已经在仓库，不需要更新包。
 
-这次只把联播 Cut1 换成指定的 **leftsmall i80**，不是 rhythm i80，也不是 11 月 13 日续训的 guard 候选。Cut2、Cut3、controller、PD、输入设置和切换流程不变。i80 仍需真机验收，不能预设高摩擦左跨已经解决。
+这次只把联播 Cut1 换成 **closefeet i100（2026-11-16）**，即用户看过完整 reference / i80 / i100 对比视频后选定的现场测试候选。它在冻结 i80 的基础上，将训练得到的局部腿部修正封装在 ONNX 内；不需要外部后处理。Cut2、Cut3、controller、PD、参考帧数、输入设置和切换流程不变。两档摩擦仿真完成全程，但收脚与滑动的离线门槛未全部通过，高摩擦第一次左跨抬脚仍小，不能预设真机问题已解决。
 
 1. **备份并同步。** 保留现场原部署及未提交修改，在独立目录检出最新 `g1loco`，记录完整提交 SHA。沿用现场已测通的 Python、bridge 二进制、网卡、DDS 和服务托管配置，不自动重编 bridge 或升级依赖。确认加载的代码来自新目录，并记录实际 bridge 路径与 SHA256。检查三个模型：
 
    ```text
-   0 cut1_leftsmall_i80_20261112.onnx
-     SHA256 5558dfe97ecf0e0b7057793fba4cfc08493b3d089690d930054783b992054ebd
+   0 cut1_closefeet_i100_20261116.onnx
+     SHA256 f3ac692251021aea8e3769e51b8f30f4407963d2476061bf7a04d853800a47fa
    1 eight_cut_2_v010_1.2x.onnx
      SHA256 bbca0a34feab8f9f73f150003910190cfe9412ef91b4a00f0b65197a2a0312bc
    2 cut3_jointv1_pitch8_rightless_20261112.onnx
@@ -29,12 +29,12 @@
 
    流程应为：常规→走跑→3 秒启动过渡→新 Cut1→3 秒交接→原 Cut2→3 秒交接→当前 Cut3→走跑→常规 500。第二轮仍从 Cut1 开始。常规模式以请求和实际状态读回为准，不只看 HTTP 200。
 
-   重点比较 Cut1 后半段两次左跨，尤其第一次：是否先移重心、左脚是否离地后横移，还是仍贴地滑动；同时逐次检查三次右跨有没有缩小，以及起身前移、Cut1→Cut2 衔接是否退化。使用当前地面完成后，条件允许再在较高摩擦的平整地面做同样对照，并记录地面。按 `policy_name/query_frame` 对齐，不套用旧视频秒数。Cut2、Cut3只做保持效果检查。
+   重点与此前 i80 在同一地面比较 Cut1 后半段两次左跨和三次右跨：跨出前能否先收脚、站稳并移重心；跨出脚是否真正离地横移，还是仍贴地滑动。特别检查高摩擦下第一次左跨，以及三次右跨是否退化。检查前半段蹲起是否新增前移、收尾和 Cut1→Cut2 衔接是否保持。使用当前地面完成后，条件允许再在较高摩擦的平整地面做同样对照，并记录地面。按 `policy_name/query_frame` 对齐，不套用旧视频秒数。Cut2、Cut3只做保持效果检查。
 
 4. **保留完整数据并回传。** HTTP 服务启动前设唯一 `ROBOJUDO_RECORD_DIR` / `ROBOJUDO_RUN_ID`，另启动现场已有状态记录器，确认 `motion.msgpack`、`state.msgpack`、stdout/stderr及完整原速带音频视频均保存；HTTP 服务不会自动运行 `start.sh` 的记录器。记录启动命令、代码 SHA、三个模型哈希、Python/bridge 路径与哈希、语音请求时间、CPU/进程情况和网卡。日志应有 `suite_start` / `SUITE_START` 的 `start_index=0`、两次段间切换、请求500与最终读回。
 
    11月13日曾有一次原 Cut2 单段运行上肢抖动，原因尚在排查。若本轮再出现，沿用现场人工停止/急停流程，保留发生前后的全部日志和音频，不自行修改 Cut2、PD、通信设置或增加自动阻尼。`/return_loco`、A/Select 是等待站姿退出，不是急停。请额外保留同机同环境的正常 Cut2 对照、进程列表和 controller/记录器标准输出，便于区分控制与记录延迟。
 
-请返回：两轮是否从Cut1开始、两次左跨和三次右跨结果、两处衔接、Cut2/Cut3是否保持、常规500切换、是否再有上肢抖动，以及上述日志和视频。需要回滚时恢复本次更新前部署（Cut1 为 `cut1_scratch_v2_i15000_zero_translation`，Cut2/Cut3仍保留当前版本），不要回退到旧 Cut3 ref6。
+请返回：两轮是否从Cut1开始、两次左跨和三次右跨结果、两处衔接、Cut2/Cut3是否保持、常规500切换、是否再有上肢抖动，以及上述日志和视频。需要回滚时恢复本次更新前部署（Cut1 为 `cut1_leftsmall_i80_20261112`，SHA256 为 `5558dfe97ecf0e0b7057793fba4cfc08493b3d089690d930054783b992054ebd`；Cut2/Cut3仍保留当前版本），不要回退到旧 Cut3 ref6。
 
-本次发布详情见 `docs/cut1_i80_release_20261113_zh.md`，HTTP 合同见 `docs/baduanjin_http_compatibility_20261112_zh.md`。
+本次发布详情见 `docs/cut1_i100_release_20261116_zh.md`，HTTP 合同见 `docs/baduanjin_http_compatibility_20261112_zh.md`。

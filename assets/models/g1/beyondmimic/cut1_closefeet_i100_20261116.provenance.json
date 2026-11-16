@@ -1,0 +1,45 @@
+{
+  "checkpoint": "/data/lizhe/cut1_residual_close_20261116/BeyondMimic/logs/rsl_rl/g1_23dof_flat/2026-11-16_05-23-54_cut1_residual_close_20261116/model_100.pt",
+  "iteration": 100,
+  "checkpoint_sha256": "e7525047b1b31003084d3f220c2e849dd1e25e5ea41576d2c806338c93fabd4c",
+  "onnx_sha256": "f3ac692251021aea8e3769e51b8f30f4407963d2476061bf7a04d853800a47fa",
+  "reference_and_nominal_control_parameters_unchanged": true,
+  "entire_i80_actor_frozen": true,
+  "upper_action_exact": true,
+  "outside_gate_action_exact": true,
+  "outside_gate_test_count": 29,
+  "phase_windows": [
+    [
+      5220,
+      5589
+    ],
+    [
+      5870,
+      6219
+    ],
+    [
+      6470,
+      6849
+    ],
+    [
+      7070,
+      7418
+    ],
+    [
+      7670,
+      8053
+    ]
+  ],
+  "observations": 130,
+  "actions": 23,
+  "motion_frames": 8627,
+  "max_onnx_torch_error": 7.62939453125e-06,
+  "runtime_external_postprocessing": false,
+  "architecture": "frozen i80 + trained bounded local leg residual inside ONNX",
+  "stage_A_only": true,
+  "release_name": "cut1_closefeet_i100_20261116",
+  "base_model": "cut1_leftsmall_i80_20261112",
+  "base_model_sha256": "5558dfe97ecf0e0b7057793fba4cfc08493b3d089690d930054783b992054ebd",
+  "repository_base_commit": "8a0270ec99bc23b5b6e7c82497f540bdffabd3d8",
+  "release_status": "user_selected_field_test_candidate_not_all_offline_gates_passed"
+}

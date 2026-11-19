@@ -18,7 +18,7 @@ class g1_baduanjin_23dof_suite(G1BaduanjinSuitePipelineCfg):
     mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = [
         G1BeyondMimic23DoFPolicyCfg(policy_name='cut1_closefeet_i100_20261116',without_state_estimator=False,max_timestep=8627),
         G1BeyondMimic23DoFPolicyCfg(policy_name='eight_cut_2_v010_1.2x',without_state_estimator=False,max_timestep=5960),
-        G1BeyondMimic23DoFPolicyCfg(policy_name='cut3_jointv1_pitch8_rightless_20261112',without_state_estimator=False,max_timestep=5299),
+        G1BeyondMimic23DoFPolicyCfg(policy_name='cut3_field_scratch_i5999',without_state_estimator=False,max_timestep=5299),
     ]
 
 

@@ -1,6 +1,6 @@
 # 八段锦 23DoF：三段联播与《联调-v1》定位后的 Cut3 更新
 
-> 2026-11-16 当前测试版本：联播 Cut1 已换为 `cut1_closefeet_i100_20261116`，Cut2/Cut3不变。详见 [本次发布说明](cut1_i100_release_20261116_zh.md) 和 [最新测试prompt](baduanjin_suite_test_prompt_20261112_zh.md)。下文是11月12日Cut3发布记录，其中“Cut1不变”和ref6回滚范围属于该历史版本。
+> 2026-11-19 当前测试版本为 Cut1 i100、Cut2 v010、Cut3 i5999。003 单段与联播共用此顺序。[003 同步与单段测试 prompt](baduanjin_suite_test_prompt_20261112_zh.md)。下文保留 11 月 12 日发布时的模型、指标和回滚说明。
 
 2026-11-12。本次在 `g1loco` 的 `959a380da952ce560516b5e7d33714d9e6f5ddb1` 基础上发布，只新增 Cut3 ONNX，并更新默认模型选择、对应哈希校验和部署文档。Cut1、Cut2及controller实现均不变。模型随仓库获取，不需要更新包。本版完成离线验证，尚待现场实机测试。
 

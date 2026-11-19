@@ -1,40 +1,7 @@
-请从 https://github.com/Andisyc/RoboJudo_Real 的 **g1loco** 分支拉取最新代码，在此前测试的 **23DoF 背包机器人**部署并测试三段联播。模型已经在仓库，不需要更新包。
+请在 **003（23DoF 背包）** 同步 GitHub 仓库 https://github.com/Andisyc/RoboJudo_Real 的 `g1loco` 分支。本轮只实测一次 Cut3 单段，联播同步更新默认模型。
 
-这次只把联播 Cut1 换成 **closefeet i100（2026-11-16）**，即用户看过完整 reference / i80 / i100 对比视频后选定的现场测试候选。它在冻结 i80 的基础上，将训练得到的局部腿部修正封装在 ONNX 内；不需要外部后处理。Cut2、Cut3、controller、PD、参考帧数、输入设置和切换流程不变。两档摩擦仿真完成全程，但收脚与滑动的离线门槛未全部通过，高摩擦第一次左跨抬脚仍小，不能预设真机问题已解决。
-
-1. **备份并同步。** 保留现场原部署及未提交修改，在独立目录检出最新 `g1loco`，记录完整提交 SHA。沿用现场已测通的 Python、bridge 二进制、网卡、DDS 和服务托管配置，不自动重编 bridge 或升级依赖。确认加载的代码来自新目录，并记录实际 bridge 路径与 SHA256。检查三个模型：
-
-   ```text
-   0 cut1_closefeet_i100_20261116.onnx
-     SHA256 f3ac692251021aea8e3769e51b8f30f4407963d2476061bf7a04d853800a47fa
-   1 eight_cut_2_v010_1.2x.onnx
-     SHA256 bbca0a34feab8f9f73f150003910190cfe9412ef91b4a00f0b65197a2a0312bc
-   2 cut3_jointv1_pitch8_rightless_20261112.onnx
-     SHA256 70a509a3082737909a2ca1d02680a68122bba098bd3b7b0cacb42d76d6212e3e
-   ```
-
-   Cut2 保留 UNITREE 平移输入；Cut1/Cut3 的原有零平移输入权重在模型内，不要将环境统一改成 DUMMY。不要添加滤波、髋部补偿或其他后处理。单段入口 `g1_baduanjin_23dof_select` 共享这三个模型，仍按 0/1/2 选段；其他独立单段配置不在这次更新范围。
-
-2. **先做离线检查。** 使用现场 controller 的 Python 环境，保留现场控制网卡和记录器网卡，确认两者一致，将 `UNITREE_NET_IF` 设为该网卡。以下检查不初始化机器人、不发送动作：
-
-   ```bash
-   python scripts/check_baduanjin_suite.py
-   python scripts/check_g1_native_config.py -c g1_baduanjin_23dof_suite --net-if "$UNITREE_NET_IF"
-   python -m pytest -q tests/test_baduanjin_http.py tests/test_baduanjin_suite.py tests/test_pose_transition.py tests/test_mimic_safety_offline.py tests/test_g1_native_integration.py tests/test_g1_backpack_contract.py
-   ```
-
-   检查通过后再由现场人员启动真实测试。不要同时运行旧服务、新 HTTP 服务和 `start.sh` 多个 controller。旧服务按原流程交还官方运控、确认 `publish_enabled=false` 后再更换。
-
-3. **沿用原语音调用完成两轮联播。** 入口仍为 `g1_baduanjin_23dof_suite`。首次加载/服务重建：`POST /start`，JSON 为 `{"config_name":"g1_baduanjin_23dof_suite"}`；已加载时不重复 start。每次演出只发送一次 `POST /enter_mimic`，不带请求体，**不需要 `/select_policy`**，每次自动从 Cut1 首帧开始。沿用原唤醒词和 Agent，不逐段启动。
-
-   流程应为：常规→走跑→3 秒启动过渡→新 Cut1→3 秒交接→原 Cut2→3 秒交接→当前 Cut3→走跑→常规 500。第二轮仍从 Cut1 开始。常规模式以请求和实际状态读回为准，不只看 HTTP 200。
-
-   重点与此前 i80 在同一地面比较 Cut1 后半段两次左跨和三次右跨：跨出前能否先收脚、站稳并移重心；跨出脚是否真正离地横移，还是仍贴地滑动。特别检查高摩擦下第一次左跨，以及三次右跨是否退化。检查前半段蹲起是否新增前移、收尾和 Cut1→Cut2 衔接是否保持。使用当前地面完成后，条件允许再在较高摩擦的平整地面做同样对照，并记录地面。按 `policy_name/query_frame` 对齐，不套用旧视频秒数。Cut2、Cut3只做保持效果检查。
-
-4. **保留完整数据并回传。** HTTP 服务启动前设唯一 `ROBOJUDO_RECORD_DIR` / `ROBOJUDO_RUN_ID`，另启动现场已有状态记录器，确认 `motion.msgpack`、`state.msgpack`、stdout/stderr及完整原速带音频视频均保存；HTTP 服务不会自动运行 `start.sh` 的记录器。记录启动命令、代码 SHA、三个模型哈希、Python/bridge 路径与哈希、语音请求时间、CPU/进程情况和网卡。日志应有 `suite_start` / `SUITE_START` 的 `start_index=0`、两次段间切换、请求500与最终读回。
-
-   11月13日曾有一次原 Cut2 单段运行上肢抖动，原因尚在排查。若本轮再出现，沿用现场人工停止/急停流程，保留发生前后的全部日志和音频，不自行修改 Cut2、PD、通信设置或增加自动阻尼。`/return_loco`、A/Select 是等待站姿退出，不是急停。请额外保留同机同环境的正常 Cut2 对照、进程列表和 controller/记录器标准输出，便于区分控制与记录延迟。
-
-请返回：两轮是否从Cut1开始、两次左跨和三次右跨结果、两处衔接、Cut2/Cut3是否保持、常规500切换、是否再有上肢抖动，以及上述日志和视频。需要回滚时恢复本次更新前部署（Cut1 为 `cut1_leftsmall_i80_20261112`，SHA256 为 `5558dfe97ecf0e0b7057793fba4cfc08493b3d089690d930054783b992054ebd`；Cut2/Cut3仍保留当前版本），不要回退到旧 Cut3 ref6。
-
-本次发布详情见 `docs/cut1_i100_release_20261116_zh.md`，HTTP 合同见 `docs/baduanjin_http_compatibility_20261112_zh.md`。
+1. 找到上次 003 手动单段与语音联播各自实际使用的部署目录、Python 和启动入口。保留现场改动（含运控保护）和可回滚版本，从 GitHub 同步发布的 ONNX、共享配置中索引 2 的模型选择和离线校验。如两入口使用不同代码副本，分别核对。如果工作树有现场修改，保留修改并合入本次差异。沿用现有 bridge、网卡、DDS 和服务启动方式。记录来源提交与实际部署路径。
+2. 在两个入口实际使用的环境中运行 `python scripts/check_baduanjin_suite.py`。应得到 0 = Cut1 i100，1 = Cut2 v010，2 = `cut3_field_scratch_i5999`（5299 帧）。核对实际加载的 `assets/models/g1/beyondmimic/cut3_field_scratch_i5999.onnx` 的 SHA-256 为 `042833fcfa9b55fc5b45902f34865f491cf60354c0b5e438386053ea9e8784ab`。单段与联播都要生效，包括服务下次启动时使用的路径。
+3. 由现场人员按原交还和停服流程释放语音联播 controller，确认只留一路控制。沿用 003 上次带记录器的单段入口（仓库入口为 `bash start.sh -c g1_baduanjin_23dof_select`）。现场用 R1 选到索引 2，看到当前选中 i5999 后按 Start，只跑一次。录制原速全身视频，双脚、双手均入镜；保留本轮控制台输出及同一运行目录下的 `motion.msgpack`、`state.msgpack`。
+4. 从 Cut3 正式播放起，观察约 47 秒和 74 秒回正时的前倾、踮脚或垫步，记录哪只脚、对应时间；同时看开头 0–5 秒、15–20 秒及收尾 1:35–1:40 的肩臂动作。记录结束后常规运控 FSM 500 的实际读回。异常时按现场既有人工停止流程处理，保留已录数据。
+5. 单段交还控制并退出后，按原托管方式恢复更新后的联播服务；核对 `g1_baduanjin_23dof_suite` 的模型清单，联播仍从 Cut1 开始，本轮无需实跑三段。请返回提交、实际 Cut3 哈希、运行目录、完整视频及两处垫步和上肢观察。需要回滚时恢复此次留存的部署，原 Cut3 为 `cut3_jointv1_pitch8_rightless_20261112`。

@@ -16,7 +16,7 @@ from robojudo.pipeline.g1_baduanjin_suite_pipeline import validate_blend_policie
 MODELS = [
     ("cut1_closefeet_i100_20261116", 8627, "f3ac692251021aea8e3769e51b8f30f4407963d2476061bf7a04d853800a47fa"),
     ("eight_cut_2_v010_1.2x", 5960, "bbca0a34feab8f9f73f150003910190cfe9412ef91b4a00f0b65197a2a0312bc"),
-    ("cut3_jointv1_pitch8_rightless_20261112", 5299, "70a509a3082737909a2ca1d02680a68122bba098bd3b7b0cacb42d76d6212e3e"),
+    ("cut3_field_scratch_i5999", 5299, "042833fcfa9b55fc5b45902f34865f491cf60354c0b5e438386053ea9e8784ab"),
 ]
 
 
@@ -34,6 +34,7 @@ def main():
     require(not cfg.fixed_hip_bias.enabled, "Old hip correction must remain disabled")
     require((cfg.entry_pose_transition_s, cfg.segment_transition_s, cfg.exit_pose_transition_s) == (3., 3., 0.), "Transition config mismatch")
     require(len(cfg.mimic_policies) == len(MODELS), "Expected three models")
+    require(manual.mimic_policies == cfg.mimic_policies, "Manual and suite model lists differ")
     policies, results = [], []
     for index, (entry, expected) in enumerate(zip(cfg.mimic_policies, MODELS)):
         name, length, digest = expected

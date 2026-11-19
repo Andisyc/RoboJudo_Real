@@ -1,7 +1,6 @@
-请在绿芽现场的 **G1-001（23DoF 背包）** 从 https://github.com/Andisyc/RoboJudo_Real 的 `g1loco` 分支同步本次 Cut3。先测一次单段，再测一次完整联播。
+请在绿芽现场的 G1-001（23DoF 背包）同步 Andisyc/RoboJudo_Real 的 g1loco 分支，先测一次 Cut3 单段，再测一次完整三段联播。现场人员负责确认场地、录像和手柄启动。两轮分别留日志。
 
-1. 以上次运行目录 `g1_run_261119-152754.MbBvyp`（单段）和 `g1_run_261119-155333.rbev8E`（联播）确认机器和两个实际入口。上次工作目录是 `/home/unitree/RoboJu/RoboJudo_BDJ_Suite_c41d9a7`。保留现场补丁、保护机制和回滚副本；若部署目录无 Git，在独立检出中取得本次差异并同步到实际加载目录。沿用现场 Python、bridge、网卡和记录器。
-2. 用实际 controller 的 Python 执行 `python scripts/check_baduanjin_suite.py`。两个入口的索引应为 0 = Cut1 i100、1 = Cut2 v010、2 = `cut3_i5999_advance8_back12_20261119`（5299 帧）。核对实际 ONNX 的 SHA-256 为 `adc55e569be9b2079bba25fc0dee6f556b637287c0b3b229bf548429c3de6fdd`。
-3. **先测单段。** 确认原 controller 已交还控制，只保留一路发布。沿用带记录器的 `bash start.sh -c g1_baduanjin_23dof_select`，现场用 R1 选到索引 2，核对控制台选中的完整模型名，再按 Start。观察起步及最后一次转身。结束后确认实际 FSM 500，退出单段 controller。
-4. **再测联播。** 使用 `g1_baduanjin_23dof_suite`，按上次带记录器的方式从 Cut1 连续跑过 Cut2 到 Cut3，保留真实的段间交接。确认进入索引 2 的切段日志显示新模型。若使用语音 HTTP 入口，沿用原调用并先打开现场轨迹记录器。任一轮出现明显失稳，按现场人工停止流程处理，保留已录数据。
-5. **两轮分别录像、留日志。** 使用同一地面和能看清右脚跟、脚尖与地面的机位，录完整原速全身视频。按 **Cut3 自身约 84–91 秒（帧 4180–4524）** 看最后一次转身，分别记录右脚是贴地、仅抬跟，还是连脚尖也离地；记下时刻、是否向前垫步、是否有人或吊带辅助。同时看 47 秒、74 秒两次回正。分别回传两段视频、两个运行目录（各含 `motion.msgpack`、`state.msgpack`）、对应控制台日志、提交号及实机模型哈希。上一版 Cut3 为 `cut3_field_scratch_i5999`。
+1. 核对上次实际部署目录 `/home/unitree/RoboJu/RoboJudo_BDJ_Suite_c41d9a7` 和两个启动入口。若现场目录无 Git 或有本地修改，在独立检出中取得本次相对 `2e2a92a` 的 controller 差异，备份受影响的文件，合入实际加载目录。保留现场网卡、Python 环境、Bridge、互斥保护和记录器。使用该 Python 在部署目录执行 `python scripts/check_baduanjin_suite.py`，确认显示 `Suite contract passed`。另用同一环境离线实例化新版 `AnkleStance`，加载 `assets/robots/g1/g1_23dof_backpack.xml` 与 suite 环境的关节名，确认 MuJoCo 和模型资源齐全。记录提交号及校验输出。两个入口的 Cut3 均应为索引 2 的 `cut3_i5999_advance8_back12_20261119`。
+2. **单段。** 沿用带记录器的 `bash start.sh -c g1_baduanjin_23dof_select`。用手柄 R1 选到 Cut3，核对模型名后按 Start。录像从启动前开始，看前 5 秒是否还有抖动或抢步。用 `motion.msgpack` 的 `pose_transition` 事件核对 `phase=entry`、`duration_s=5` 和完成时刻。结束确认回到 FSM 500，退出单段 controller。
+3. **联播。** 确认只有一路 controller 发布，沿用 `bash start.sh -c g1_baduanjin_23dof_suite` 从 Cut1 连续跑到 Cut3。Cut2 → Cut3 先插值 3 秒，再按脚位额外等待 0–3 秒。导出 `cut3_entry_stance` 的 begin、complete 以及有触发时的 settling 事件，回报过渡起止脚位、总时长、完成原因。脚位数组单位为米，第一项是左踝相对右踝领先量，第二项是两踝横向间距。达到时间上限也请如实记录。
+4. **观察与回传。** 两轮都用能同时看清全身、右脚跟和脚尖的侧前方机位，保留原速。按 Cut3 开始播放第 0 帧对时，观察约 32、59、86 秒转身时是仅抬跟还是整脚离地，47、74 秒回正是否垫步，重点看 99–103 秒有无向前扑跳。若明显失稳，按现场流程停止，保存已有数据。回传两段视频、两个完整运行目录（含 `motion.msgpack`、`state.msgpack`）、对应控制台日志、代码提交号和最终 FSM。记录参与支撑或人工干预的时刻。

@@ -22,7 +22,7 @@ class TestPoseTransition(unittest.TestCase):
                      'body_quat_w':np.tile([1.,0.,0.,0.],(14,1)), 'body_pos_w':np.zeros((14,3)), 'time_step':0}
         raw.motion_anchor_body_index=7;raw.command_init_align=NS(R_base=Rotation.identity())
         raw.timestep=0;raw.play_speed=1.
-        raw.cfg_policy=NS(start_timestep=0,max_timestep=100)
+        raw.cfg_policy=NS(start_timestep=0,max_timestep=100,policy_name="offline_test")
         p._standing_pose={n:float(i)*.005 for i,n in enumerate(p.env.names)}
         p.cfg.entry_pose_transition_s=p.cfg.exit_pose_transition_s=3.
         p.cfg.fixed_hip_bias=NS(enabled=False)
@@ -51,6 +51,25 @@ class TestPoseTransition(unittest.TestCase):
         p._step_once();raw.post_step_callback.assert_not_called()
         legacy.CLOCK[0]+=3.;p._step_once();self.assertIsNone(p._pose_transition);raw.post_step_callback.assert_not_called()
         p._step_once();raw.post_step_callback.assert_called_once()
+
+    def test_selected_cut3_holds_first_reference_for_five_seconds(self):
+        p, raw = self.make()
+        p.cfg.entry_pose_transition_by_policy_s = {"cut3": 5.0}
+        self.assertEqual(p._entry_pose_duration(), 3.0)
+        raw.cfg_policy.policy_name = "cut3"
+        p._begin_pose_transition("entry", p.env.get_data())
+        p.state = legacy.State.MIMIC_ACTIVE
+        raw.post_step_callback = Mock()
+        legacy.CLOCK[0] += 4.99
+        p._step_once()
+        self.assertIsNotNone(p._pose_transition)
+        raw.post_step_callback.assert_not_called()
+        legacy.CLOCK[0] += 0.01
+        p._step_once()
+        self.assertIsNone(p._pose_transition)
+        raw.post_step_callback.assert_not_called()
+        p._step_once()
+        raw.post_step_callback.assert_called_once()
 
     def test_exit_waits_three_seconds_before_handback_and_holds_goal(self):
         p,raw=self.make();p.state=legacy.State.MIMIC_ACTIVE;p.env.has_user_control=True;p.env.authority='USER_ACTIVE';p.env.fsm=1000

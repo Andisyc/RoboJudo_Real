@@ -33,6 +33,11 @@ def main():
     require(cfg.env.unitree.regular_fsm_id == 500, "This 23DoF release requires FSM request 500")
     require(not cfg.fixed_hip_bias.enabled, "Old hip correction must remain disabled")
     require((cfg.entry_pose_transition_s, cfg.segment_transition_s, cfg.exit_pose_transition_s) == (3., 3., 0.), "Transition config mismatch")
+    require(manual.entry_pose_transition_s == 3.0 and
+            manual.entry_pose_transition_by_policy_s == {MODELS[2][0]: 5.0} and
+            not cfg.entry_pose_transition_by_policy_s, "Single Cut3 entry must be 5s")
+    require(cfg.cut3_entry_settle_s == 3.0 and manual.cut3_entry_settle_s == 0.0,
+            "Foot-position settling must be limited to the suite Cut3 transition")
     require(len(cfg.mimic_policies) == len(MODELS), "Expected three models")
     require(manual.mimic_policies == cfg.mimic_policies, "Manual and suite model lists differ")
     policies, results = [], []

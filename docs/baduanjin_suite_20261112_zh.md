@@ -1,6 +1,6 @@
 # 八段锦 23DoF：三段联播与《联调-v1》定位后的 Cut3 更新
 
-> 2026-11-19 现场测试顺序为 Cut1 i100、Cut2 v010、Cut3 i5999 advance8_back12。单段选择与三段联播共用这个顺序。[001 同步与测试 prompt](baduanjin_suite_test_prompt_20261112_zh.md)。下文保留 11 月 12 日的发布记录。
+> 2026-11-19 现场测试顺序为 Cut1 i100、Cut2 v010、Cut3 i5999 advance8_back12。单段选择与三段联播共用这个顺序。单测 Cut3 起步插值 5 秒。联播 Cut2 → Cut3 先插值 3 秒，再按实测前后脚位额外保持第 0 帧最多 3 秒。[001 同步与测试 prompt](baduanjin_suite_test_prompt_20261112_zh.md)。下文保留 11 月 12 日的发布记录。
 
 2026-11-12。本次在 `g1loco` 的 `959a380da952ce560516b5e7d33714d9e6f5ddb1` 基础上发布，只新增 Cut3 ONNX，并更新默认模型选择、对应哈希校验和部署文档。Cut1、Cut2及controller实现均不变。模型随仓库获取，不需要更新包。本版完成离线验证，尚待现场实机测试。
 

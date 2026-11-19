@@ -38,7 +38,8 @@ class TestSuite(unittest.TestCase):
     def make(self):
         p=mod.G1BaduanjinSuitePipeline.__new__(mod.G1BaduanjinSuitePipeline)
         p.policy_manager=Manager();p._segment_blend=None;p._suite_cancelled=False;p._last_sent_target=np.array([0.,1.])
-        p.cfg=NS(auto_sequence=True,segment_transition_s=3.)
+        p.cfg=NS(auto_sequence=True,segment_transition_s=3.,cut3_entry_settle_s=3.)
+        p._ankle_stance=None
         p.state=NativeLocoMimicState.MIMIC_ACTIVE;p._hold=False;p._handback_reason=None;p._stop_reason=None;p.timestep=0
         p._motion_trace=None;p._step_errors=0
         p._entry_blocked=False
@@ -64,6 +65,29 @@ class TestSuite(unittest.TestCase):
             clock[0]=3;p._step_once();np.testing.assert_array_equal(p.env.step.call_args.args[0],[1,2])
             self.assertEqual(p.policy_manager.current_policy_id,1);self.assertEqual(incoming.timestep,0)
             self.assertIsNone(p._segment_blend);p.env.reset.assert_not_called()
+
+    def test_cut3_left_lead_settles_on_frame_zero(self):
+        for finish, lead, cancelled in [(4.5, .038, False), (6., .09, False), (4., .09, True)]:
+            with self.subTest(finish=finish):
+                p = self.make()
+                p.policy_manager._current_policy_id = 1
+                p._ankle_stance = Mock()
+                p._ankle_stance.measure.side_effect = [np.array([x, .36]) for x in (.035, .17, .09, lead)]
+                clock = [0.]
+                with patch.object(mod, 'time', NS(monotonic=lambda:clock[0])):
+                    p._begin_segment_blend(p.data)
+                    clock[0] = 3.
+                    p._step_once()
+                    self.assertEqual(p.policy_manager.current_policy_id, 1)
+                    self.assertEqual(p._segment_blend['incoming'].timestep, 0)
+                    p._suite_cancelled = cancelled
+                    clock[0] = finish
+                    with patch.object(G1NativeLocoMimicPipeline, '_operator_stop') as stop:
+                        p._step_once()
+                        self.assertEqual(stop.called, cancelled)
+                    self.assertEqual(p.policy_manager.current_policy_id, 2)
+                    self.assertEqual(p.policy.timestep, 0)
+                    p.env.reset.assert_not_called()
 
     def test_incoming_alignment_matches_actual_heading(self):
         p=self.make();p._begin_segment_blend(p.data);inc=p.policy_manager.policy_by_id(1)

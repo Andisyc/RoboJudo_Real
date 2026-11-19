@@ -129,11 +129,13 @@ class G1NativeLocoMimicPipelineCfg(PipelineCfg):
     fixed_hip_bias: FixedHipBiasCfg = FixedHipBiasCfg()
     # Opt-in reference transitions; all existing launch configurations remain unchanged.
     entry_pose_transition_s: float = 0.0
+    entry_pose_transition_by_policy_s: dict[str, float] = {}
     exit_pose_transition_s: float = 0.0
 
     @model_validator(mode="after")
     def check_native_loco_mimic(self):
-        for duration in (self.entry_pose_transition_s, self.exit_pose_transition_s):
+        for duration in (self.entry_pose_transition_s, self.exit_pose_transition_s,
+                         *self.entry_pose_transition_by_policy_s.values()):
             if not math.isfinite(duration) or not 0 <= duration <= 10:
                 raise ValueError("pose transition duration must be finite and in [0, 10] seconds")
         if not self.mimic_policies:
@@ -147,6 +149,7 @@ class G1BaduanjinSuitePipelineCfg(G1NativeLocoMimicPipelineCfg):
     pipeline_type: str = "G1BaduanjinSuitePipeline"
     auto_sequence: bool = True
     segment_transition_s: float = 3.0
+    cut3_entry_settle_s: float = 0.0
 
     @model_validator(mode="after")
     def check_suite(self):
@@ -154,6 +157,8 @@ class G1BaduanjinSuitePipelineCfg(G1NativeLocoMimicPipelineCfg):
             raise ValueError("Suite requires exactly three 23DoF policies")
         if not math.isfinite(self.segment_transition_s) or not 1 <= self.segment_transition_s <= 10:
             raise ValueError("segment_transition_s must be in [1, 10]")
+        if not 0 <= self.cut3_entry_settle_s <= 3:
+            raise ValueError("cut3_entry_settle_s must be in [0, 3]")
         if self.exit_pose_transition_s != 0:
             raise ValueError("Unaccepted default-standing exit transition is disabled for the suite")
         return self

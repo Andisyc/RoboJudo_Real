@@ -6,10 +6,12 @@ from scipy.spatial.transform import Rotation
 
 from robojudo.pipeline import pipeline_registry
 from robojudo.pipeline.g1_native_loco_mimic_pipeline import G1NativeLocoMimicPipeline, NativeLocoMimicState
+from robojudo.config import ASSETS_DIR
 from robojudo.tools.pose_transition import PoseReferenceTransition
 from robojudo.utils.rotation import TransformAlignment
 
 logger = logging.getLogger(__name__)
+LEFT_LEAD_TOLERANCE_M = 0.005
 
 
 def raw_policy(policy):
@@ -42,6 +44,12 @@ class G1BaduanjinSuitePipeline(G1NativeLocoMimicPipeline):
         self._suite_cancelled = False
         super().__init__(cfg)
         validate_blend_policies(self.policy_manager.policies, self.env.joint_names)
+        self._ankle_stance = None
+        if cfg.auto_sequence and cfg.cut3_entry_settle_s > 0:
+            from robojudo.tools.ankle_stance import AnkleStance
+
+            self._ankle_stance = AnkleStance(
+                ASSETS_DIR / "robots/g1/g1_23dof_backpack.xml", self.env.joint_names)
 
     def send_traced(self, target, *args, **kwargs):
         result = super().send_traced(target, *args, **kwargs)
@@ -127,6 +135,14 @@ class G1BaduanjinSuitePipeline(G1NativeLocoMimicPipeline):
         self._seed_history(incoming, self._last_sent_target)
         self._freeze_reference()
         self._segment_blend = dict(incoming=incoming, incoming_id=incoming_id, reference=transition)
+        if incoming_id == 2 and self._ankle_stance is not None:
+            # Reference joints are in policy order; FK expects environment order.
+            to_env = np.argsort(order)
+            root_xyzw = raw.command['body_quat_w'][0][[1, 2, 3, 0]]
+            reference = self._ankle_stance.measure(ref_q[to_env], root_xyzw)
+            self._segment_blend['reference_stance'] = reference
+            self.trace_event('cut3_entry_stance', event='begin', reference_m=reference.tolist(),
+                             measured_m=self._ankle_stance.measure(env_data['dof_pos'], env_data['base_quat']).tolist())
         logger.warning("SUITE_TRANSITION: index %d -> %d (%s), %.1fs", manager.current_policy_id,
                        incoming_id, incoming.cfg_policy.policy_name, self.cfg.segment_transition_s)
         self.trace_event('segment_transition', event='begin', from_index=manager.current_policy_id,
@@ -151,7 +167,8 @@ class G1BaduanjinSuitePipeline(G1NativeLocoMimicPipeline):
         blend = self._segment_blend
         incoming = blend['incoming']
         transition = blend['reference']
-        reference, done = transition.sample(time.monotonic())
+        now = time.monotonic()
+        reference, done = transition.sample(now)
         raw_policy(incoming).command = reference
         old_obs, _ = self.policy.get_observation(data, ctrl)
         old_target = self.policy.get_pd_target(old_obs)
@@ -169,6 +186,20 @@ class G1BaduanjinSuitePipeline(G1NativeLocoMimicPipeline):
         self.ctrl_manager.post_step_callback(ctrl)
         self._step_errors = 0
         self.timestep += 1
+        if done and 'reference_stance' in blend and not self._suite_cancelled:
+            stance = self._ankle_stance.measure(data['dof_pos'], data['base_quat'])
+            elapsed = now - transition.started_at
+            left_lead_error = stance[0] - blend['reference_stance'][0]
+            if left_lead_error > LEFT_LEAD_TOLERANCE_M and elapsed < transition.duration_s + self.cfg.cut3_entry_settle_s:
+                if 'settling' not in blend:
+                    blend['settling'] = True
+                    self.trace_event('cut3_entry_stance', event='settling', measured_m=stance.tolist(),
+                                     left_lead_error_m=float(left_lead_error))
+                return
+            reason = ('invalid_measurement' if not np.isfinite(left_lead_error) else
+                      'time_limit' if left_lead_error > LEFT_LEAD_TOLERANCE_M else 'left_lead_ok')
+            self.trace_event('cut3_entry_stance', event='complete', reason=reason, elapsed_s=elapsed,
+                             reference_m=blend['reference_stance'].tolist(), measured_m=stance.tolist())
         if done:
             # Do not call set_policy(): it resets the shared environment heading.
             self.policy_manager._current_policy_id = blend['incoming_id']

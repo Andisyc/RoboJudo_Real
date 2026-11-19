@@ -324,7 +324,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
             self._pose_hold_command = None
             self._pose_transition = None
             self._pose_settle_deadline = None
-            if self.cfg.entry_pose_transition_s > 0:
+            if self._entry_pose_duration() > 0:
                 self._begin_pose_transition("entry", env_data)
             observation, extras = self.policy.get_observation(env_data, ctrl_data)
             if self.mimic_guard:
@@ -779,6 +779,11 @@ class G1NativeLocoMimicPipeline(Pipeline):
         self.send_traced(pd_target, extras.get("hand_pose", None), commands=ctrl_data.get("COMMANDS", []))
         return extras, pd_target
 
+    def _entry_pose_duration(self):
+        return self.cfg.entry_pose_transition_by_policy_s.get(
+            self.policy.cfg_policy.policy_name, self.cfg.entry_pose_transition_s
+        )
+
     def _begin_pose_transition(self, phase, env_data):
         raw = getattr(self.policy, "__dict__", {}).get("policy", self.policy)
         names = list(self.policy.cfg_action_dof.joint_names)
@@ -793,7 +798,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
             # convert back to the ONNX command's world frame before interpolation.
             start_anchor = (raw.command_init_align.R_base *
                             Rotation.from_quat(env_data["torso_quat"])).as_quat()[[3, 0, 1, 2]]
-            duration = self.cfg.entry_pose_transition_s
+            duration = self._entry_pose_duration()
         else:
             start_q = command["joint_pos"]
             goal_q = np.asarray([self._standing_pose[n] for n in names])

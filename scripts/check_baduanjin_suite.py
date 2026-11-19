@@ -16,7 +16,7 @@ from robojudo.pipeline.g1_baduanjin_suite_pipeline import validate_blend_policie
 MODELS = [
     ("cut1_closefeet_i100_20261116", 8627, "f3ac692251021aea8e3769e51b8f30f4407963d2476061bf7a04d853800a47fa"),
     ("eight_cut_2_v010_1.2x", 5960, "bbca0a34feab8f9f73f150003910190cfe9412ef91b4a00f0b65197a2a0312bc"),
-    ("cut3_field_scratch_i5999", 5299, "042833fcfa9b55fc5b45902f34865f491cf60354c0b5e438386053ea9e8784ab"),
+    ("cut3_i5999_advance8_back12_20261119", 5299, "adc55e569be9b2079bba25fc0dee6f556b637287c0b3b229bf548429c3de6fdd"),
 ]
 
 

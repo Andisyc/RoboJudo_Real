@@ -1,7 +1,7 @@
-请在 **003（23DoF 背包）** 同步 GitHub 仓库 https://github.com/Andisyc/RoboJudo_Real 的 `g1loco` 分支。本轮只实测一次 Cut3 单段，联播同步更新默认模型。
+请在绿芽现场的 **G1-001（23DoF 背包）** 从 https://github.com/Andisyc/RoboJudo_Real 的 `g1loco` 分支同步本次 Cut3。先测一次单段，再测一次完整联播。
 
-1. 找到上次 003 手动单段与语音联播各自实际使用的部署目录、Python 和启动入口。保留现场改动（含运控保护）和可回滚版本，从 GitHub 同步发布的 ONNX、共享配置中索引 2 的模型选择和离线校验。如两入口使用不同代码副本，分别核对。如果工作树有现场修改，保留修改并合入本次差异。沿用现有 bridge、网卡、DDS 和服务启动方式。记录来源提交与实际部署路径。
-2. 在两个入口实际使用的环境中运行 `python scripts/check_baduanjin_suite.py`。应得到 0 = Cut1 i100，1 = Cut2 v010，2 = `cut3_field_scratch_i5999`（5299 帧）。核对实际加载的 `assets/models/g1/beyondmimic/cut3_field_scratch_i5999.onnx` 的 SHA-256 为 `042833fcfa9b55fc5b45902f34865f491cf60354c0b5e438386053ea9e8784ab`。单段与联播都要生效，包括服务下次启动时使用的路径。
-3. 由现场人员按原交还和停服流程释放语音联播 controller，确认只留一路控制。沿用 003 上次带记录器的单段入口（仓库入口为 `bash start.sh -c g1_baduanjin_23dof_select`）。现场用 R1 选到索引 2，看到当前选中 i5999 后按 Start，只跑一次。录制原速全身视频，双脚、双手均入镜；保留本轮控制台输出及同一运行目录下的 `motion.msgpack`、`state.msgpack`。
-4. 从 Cut3 正式播放起，观察约 47 秒和 74 秒回正时的前倾、踮脚或垫步，记录哪只脚、对应时间；同时看开头 0–5 秒、15–20 秒及收尾 1:35–1:40 的肩臂动作。记录结束后常规运控 FSM 500 的实际读回。异常时按现场既有人工停止流程处理，保留已录数据。
-5. 单段交还控制并退出后，按原托管方式恢复更新后的联播服务；核对 `g1_baduanjin_23dof_suite` 的模型清单，联播仍从 Cut1 开始，本轮无需实跑三段。请返回提交、实际 Cut3 哈希、运行目录、完整视频及两处垫步和上肢观察。需要回滚时恢复此次留存的部署，原 Cut3 为 `cut3_jointv1_pitch8_rightless_20261112`。
+1. 以上次运行目录 `g1_run_261119-152754.MbBvyp`（单段）和 `g1_run_261119-155333.rbev8E`（联播）确认机器和两个实际入口。上次工作目录是 `/home/unitree/RoboJu/RoboJudo_BDJ_Suite_c41d9a7`。保留现场补丁、保护机制和回滚副本；若部署目录无 Git，在独立检出中取得本次差异并同步到实际加载目录。沿用现场 Python、bridge、网卡和记录器。
+2. 用实际 controller 的 Python 执行 `python scripts/check_baduanjin_suite.py`。两个入口的索引应为 0 = Cut1 i100、1 = Cut2 v010、2 = `cut3_i5999_advance8_back12_20261119`（5299 帧）。核对实际 ONNX 的 SHA-256 为 `adc55e569be9b2079bba25fc0dee6f556b637287c0b3b229bf548429c3de6fdd`。
+3. **先测单段。** 确认原 controller 已交还控制，只保留一路发布。沿用带记录器的 `bash start.sh -c g1_baduanjin_23dof_select`，现场用 R1 选到索引 2，核对控制台选中的完整模型名，再按 Start。观察起步及最后一次转身。结束后确认实际 FSM 500，退出单段 controller。
+4. **再测联播。** 使用 `g1_baduanjin_23dof_suite`，按上次带记录器的方式从 Cut1 连续跑过 Cut2 到 Cut3，保留真实的段间交接。确认进入索引 2 的切段日志显示新模型。若使用语音 HTTP 入口，沿用原调用并先打开现场轨迹记录器。任一轮出现明显失稳，按现场人工停止流程处理，保留已录数据。
+5. **两轮分别录像、留日志。** 使用同一地面和能看清右脚跟、脚尖与地面的机位，录完整原速全身视频。按 **Cut3 自身约 84–91 秒（帧 4180–4524）** 看最后一次转身，分别记录右脚是贴地、仅抬跟，还是连脚尖也离地；记下时刻、是否向前垫步、是否有人或吊带辅助。同时看 47 秒、74 秒两次回正。分别回传两段视频、两个运行目录（各含 `motion.msgpack`、`state.msgpack`）、对应控制台日志、提交号及实机模型哈希。上一版 Cut3 为 `cut3_field_scratch_i5999`。

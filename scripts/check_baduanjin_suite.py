@@ -36,6 +36,8 @@ def main():
     require(manual.entry_pose_transition_s == 3.0 and
             manual.entry_pose_transition_by_policy_s == {MODELS[2][0]: 5.0} and
             not cfg.entry_pose_transition_by_policy_s, "Single Cut3 entry must be 5s")
+    require(manual.entry_target_blend_by_policy_s == {MODELS[2][0]: 1.5} and
+            not cfg.entry_target_blend_by_policy_s, "Final target blend must be single Cut3 only")
     require(cfg.cut3_entry_settle_s == 3.0 and manual.cut3_entry_settle_s == 0.0,
             "Foot-position settling must be limited to the suite Cut3 transition")
     require(len(cfg.mimic_policies) == len(MODELS), "Expected three models")

@@ -130,10 +130,15 @@ class G1NativeLocoMimicPipelineCfg(PipelineCfg):
     # Opt-in reference transitions; all existing launch configurations remain unchanged.
     entry_pose_transition_s: float = 0.0
     entry_pose_transition_by_policy_s: dict[str, float] = {}
+    entry_target_blend_by_policy_s: dict[str, float] = {}
     exit_pose_transition_s: float = 0.0
 
     @model_validator(mode="after")
     def check_native_loco_mimic(self):
+        for policy, duration in self.entry_target_blend_by_policy_s.items():
+            reference_duration = self.entry_pose_transition_by_policy_s.get(policy, self.entry_pose_transition_s)
+            if not 0 < duration <= reference_duration:
+                raise ValueError("Target blend must fit inside the entry reference transition")
         for duration in (self.entry_pose_transition_s, self.exit_pose_transition_s,
                          *self.entry_pose_transition_by_policy_s.values()):
             if not math.isfinite(duration) or not 0 <= duration <= 10:

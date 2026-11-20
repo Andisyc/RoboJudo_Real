@@ -14,6 +14,10 @@ spec=importlib.util.spec_from_file_location('pose',ROOT/'robojudo/tools/pose_tra
 pose=importlib.util.module_from_spec(spec);spec.loader.exec_module(pose)
 legacy.ns['Rotation']=Rotation;legacy.ns['PoseReferenceTransition']=pose.PoseReferenceTransition
 
+spec=importlib.util.spec_from_file_location('blend',ROOT/'robojudo/tools/entry_target_blend.py')
+blend=importlib.util.module_from_spec(spec);spec.loader.exec_module(blend)
+legacy.ns['EntryTargetBlend']=blend.EntryTargetBlend
+
 class TestPoseTransition(unittest.TestCase):
     def make(self):
         p=legacy.make(policy_cls=legacy.StancePolicy)
@@ -70,6 +74,57 @@ class TestPoseTransition(unittest.TestCase):
         raw.post_step_callback.assert_not_called()
         p._step_once()
         raw.post_step_callback.assert_called_once()
+
+    def make_blended_entry(self):
+        p, raw = self.make()
+        p.cfg.fixed_hip_bias = NS(enabled=False, policy_name="disabled", model_dump=lambda: {})
+        get_data = p.env.get_data
+        p.env.get_data = lambda: dict(get_data(), base_ang_vel=np.zeros(3), base_lin_vel=np.zeros(3))
+        p.cfg.entry_target_blend_by_policy_s = {"offline_test": 1.5}
+        p.cfg.entry_pose_transition_s = 5.
+        p.env.stiffness = np.full(len(p.env.names), 100.)
+        p.env.measured_joint_torque = Mock(return_value=np.full(len(p.env.names), 10.))
+        raw.default_pos = np.zeros(len(p.env.names))
+        raw.action_scales = np.full(len(p.env.names), .5)
+        raw.get_pd_target = Mock(return_value=p.env.q[::-1] + .4)
+        return p, raw
+
+    def test_first_publish_midpoint_and_exit_use_the_delivered_target(self):
+        p, raw = self.make_blended_entry()
+        p._enter_mimic(p.env.get_data(), {})
+        leg = np.array([any(k in n for k in ("hip", "knee", "ankle")) for n in p.env.names])
+        anchor = p.env.q + leg * .025
+        np.testing.assert_allclose(p.env.sent[0], anchor)
+        np.testing.assert_allclose(raw.last_action, anchor[::-1] / .5)
+        legacy.CLOCK[0] += .75
+        data = p.env.get_data()
+        data["base_ang_vel"] = np.array([.1, -.1, 0.])
+        p._step_pose_transition(data, {})
+        expected = (anchor + p.env.q + .4) / 2
+        for side in ("left", "right"):
+            expected[p.env.names.index(side + "_ankle_roll_joint")] += .0045
+            expected[p.env.names.index(side + "_ankle_pitch_joint")] -= .0045
+        np.testing.assert_allclose(p.env.sent[-1], expected)
+        np.testing.assert_allclose(raw.last_action, expected[::-1] / .5)
+        legacy.CLOCK[0] += .76
+        p._step_pose_transition(data, {})
+        np.testing.assert_allclose(p.env.sent[-1], p.env.q + .4)
+        self.assertIsNone(p._entry_target_blend)
+        self.assertIsNotNone(p._pose_transition)
+        self.assertEqual([v["event"] for k,v in p.events if k=="entry_target_blend"], ["begin", "complete"])
+
+    def test_entry_rejects_invalid_preload_or_raw_policy_before_first_publish(self):
+        for bad_torque in (True, False):
+            with self.subTest(bad_torque=bad_torque):
+                p, raw = self.make_blended_entry()
+                if bad_torque:
+                    p.env.measured_joint_torque.return_value[:] = np.nan
+                else:
+                    raw.get_pd_target.return_value[:] = 5.
+                p._enter_mimic(p.env.get_data(), {})
+                self.assertFalse(p.env.sent)
+                self.assertTrue(p._entry_blocked)
+                self.assertIsNone(p._entry_target_blend)
 
     def test_exit_waits_three_seconds_before_handback_and_holds_goal(self):
         p,raw=self.make();p.state=legacy.State.MIMIC_ACTIVE;p.env.has_user_control=True;p.env.authority='USER_ACTIVE';p.env.fsm=1000

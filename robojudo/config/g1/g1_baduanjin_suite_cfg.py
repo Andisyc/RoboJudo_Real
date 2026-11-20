@@ -29,3 +29,4 @@ class g1_baduanjin_23dof_select(g1_baduanjin_23dof_suite):
     auto_sequence: bool = False
     cut3_entry_settle_s: float = 0.
     entry_pose_transition_by_policy_s: dict[str, float] = {"cut3_i5999_advance8_back12_20261119": 5.0}
+    entry_target_blend_by_policy_s: dict[str, float] = {"cut3_i5999_advance8_back12_20261119": 1.5}

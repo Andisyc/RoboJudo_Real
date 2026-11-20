@@ -159,6 +159,10 @@ class G1LocoEnv(Environment):
         if self.RemoteControllerHandler is not None:
             self.RemoteControllerHandler(self.robot_state.wireless_remote)
 
+    def measured_joint_torque(self):
+        tau = np.asarray(self.robot_state.motor_state.tau_est, dtype=float)
+        return tau.copy() if self._dof_idx is None else tau[self._dof_idx]
+
     def safety_state_age(self):
         return float(self.robot_state.state_age_s) + time.monotonic() - self._state_read_time
 

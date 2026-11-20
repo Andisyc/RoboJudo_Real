@@ -54,7 +54,8 @@ class TestHTTPCompatibility(unittest.TestCase):
         self.env_patch = patch.dict(os.environ, {}, clear=False)
         self.env_patch.start(); self.addCleanup(self.env_patch.stop)
         os.environ.pop('ROBOJUDO_RECORD_DIR', None)
-        self.thread_patch = patch.object(api.threading, 'Thread')
+        # Stub only the service worker; TestClient still needs real HTTP worker threads.
+        self.thread_patch = patch.object(api, 'threading', NS(Thread=Mock()))
         self.thread_patch.start(); self.addCleanup(self.thread_patch.stop)
         self.factory_patch = patch.object(api.robojudo.pipeline, 'G1BaduanjinSuitePipeline', side_effect=self.fake_pipeline)
         self.factory_patch.start(); self.addCleanup(self.factory_patch.stop)

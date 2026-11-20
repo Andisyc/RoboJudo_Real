@@ -15,6 +15,7 @@ from robojudo.pipeline.pipeline_cfgs import G1NativeLocoMimicPipelineCfg
 from robojudo.pipeline.rl_multi_policy_pipeline import PolicyManager
 from robojudo.utils.util_func import get_gravity_orientation
 from robojudo.tools.pose_transition import PoseReferenceTransition
+from robojudo.tools.entry_target_blend import EntryTargetBlend
 
 from robojudo.tools.mimic_safety import (
     HOLD_TEXT,
@@ -99,6 +100,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
         # the environment's default pose/gains. It is not the actor action offset.
         self._standing_pose = dict(zip(self.env.joint_names, self.env.default_pos.copy()))
         self._pose_transition = None
+        self._entry_target_blend = None
         self._pose_transition_phase = None
         self._pose_hold_command = None
         self._pose_settle_deadline = None
@@ -297,7 +299,11 @@ class G1NativeLocoMimicPipeline(Pipeline):
         if self._entry_blocked:
             return None
         self._regular_deadline = None
+        self._entry_target_blend = None
         try:
+            durations = self.cfg.entry_target_blend_by_policy_s
+            blend_s = durations.get(self.policy.cfg_policy.policy_name) if durations else None
+            torque_samples = []
             if self.mimic_guard:
                 if not self.env.born_place_align:
                     raise SafetyViolation("born_place_align must be enabled")
@@ -306,6 +312,8 @@ class G1NativeLocoMimicPipeline(Pipeline):
                     self.env.update()
                     fresh = self.env.get_data()
                     self.mimic_guard.state(fresh, self.env.safety_state_age())
+                    if blend_s:
+                        torque_samples.append((time.monotonic(), self.env.measured_joint_torque()))
                     time.sleep(.02)
             before_reset_quat = np.asarray(self.env.get_data()["base_quat"]).tolist()
             self.env.reset()
@@ -332,6 +340,19 @@ class G1NativeLocoMimicPipeline(Pipeline):
             pd_target = self.policy.get_pd_target(observation)
             if self.mimic_guard:
                 pd_target = self.mimic_guard.target(pd_target, env_data["dof_pos"])
+            if blend_s:
+                now = time.monotonic()
+                recent = [tau for stamp, tau in torque_samples if now - stamp <= .09]
+                recent.append(self.env.measured_joint_torque())
+                self._entry_target_blend = EntryTargetBlend(
+                    list(self.env.joint_names), self.policy.cfg_action_dof.joint_names,
+                    env_data, self.env.stiffness, recent, blend_s)
+                pd_target = self._entry_target_blend.target(pd_target, env_data, 0.)
+                pd_target = self.mimic_guard.target(pd_target, env_data["dof_pos"])
+                self._remember_entry_target(pd_target)
+                self.trace_event("entry_target_blend", event="begin", duration_s=blend_s,
+                                 model=self.policy.cfg_policy.policy_name, torque_samples=len(recent))
+                logger.warning("ENTRY_TARGET_BLEND: single Cut3, %.2fs", blend_s)
             result = self.send_traced(pd_target, phase="acquiring", sender=self.env.acquire_user_control)
         except Exception as exc:
             self._entry_failed(exc)
@@ -357,6 +378,8 @@ class G1NativeLocoMimicPipeline(Pipeline):
         if self._pose_transition is not None:
             # Acquisition can block. The full transition starts AFTER confirmed ownership.
             self._pose_transition.started_at = time.monotonic()
+        if self._entry_target_blend is not None:
+            self._entry_blend_started_at = self._pose_transition.started_at
         self._step_errors = 0
         self._clear_stop_flags()
         self.trace_event("native_state", state=self.state.name)
@@ -369,6 +392,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
         return extras, pd_target
 
     def _entry_failed(self, exc, text=WARNING_TEXT):
+        self._entry_target_blend = None
         self._pose_transition = None
         status = self.env.get_control_status()
         if status["authority_state"] == "USER_ACTIVE" or status["publish_enabled"]:
@@ -776,8 +800,27 @@ class G1NativeLocoMimicPipeline(Pipeline):
         query_frame = int(self.policy.timestep)
         pd_target = self.policy.get_pd_target(observation)
         pd_target = self._apply_fixed_hip_bias(pd_target, query_frame)
+        pd_target = self._blend_entry_target(pd_target, env_data)
         self.send_traced(pd_target, extras.get("hand_pose", None), commands=ctrl_data.get("COMMANDS", []))
         return extras, pd_target
+
+    def _remember_entry_target(self, target):
+        raw = self.policy.policy
+        sent = target[self._entry_target_blend.policy_order]
+        raw.last_action = ((sent - raw.default_pos) / raw.action_scales).astype(np.float32)
+
+    def _blend_entry_target(self, target, env_data):
+        blend = getattr(self, "_entry_target_blend", None)
+        if blend is None:
+            return target
+        elapsed = time.monotonic() - self._entry_blend_started_at
+        if elapsed >= blend.duration_s:
+            self.trace_event("entry_target_blend", event="complete", elapsed_s=elapsed)
+            self._entry_target_blend = None
+            return target
+        target = blend.target(target, env_data, elapsed)
+        self._remember_entry_target(target)
+        return target
 
     def _entry_pose_duration(self):
         return self.cfg.entry_pose_transition_by_policy_s.get(
@@ -827,6 +870,7 @@ class G1NativeLocoMimicPipeline(Pipeline):
         raw.command = command
         observation, extras = self.policy.get_observation(env_data, ctrl_data)
         target = self.policy.get_pd_target(observation)
+        target = self._blend_entry_target(target, env_data)
         self.send_traced(target, extras.get("hand_pose"),
                          phase=f"{self._pose_transition_phase}_pose_transition",
                          commands=ctrl_data.get("COMMANDS", []))

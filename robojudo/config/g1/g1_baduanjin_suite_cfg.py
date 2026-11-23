@@ -30,3 +30,28 @@ class g1_baduanjin_23dof_select(g1_baduanjin_23dof_suite):
     cut3_entry_settle_s: float = 0.
     entry_pose_transition_by_policy_s: dict[str, float] = {"cut3_i5999_advance8_back12_20261119": 5.0}
     entry_target_blend_by_policy_s: dict[str, float] = {"cut3_i5999_advance8_back12_20261119": 1.5}
+
+
+_SHOE_CUT1 = "cut1_i100_shoe_finish_20261121"
+_SHOE_CUT3 = "cut3_i5999_shoe_recover_20261121"
+
+
+def _shoe_test_policies() -> list[G1BeyondMimic23DoFPolicyCfg]:
+    policies = deepcopy(g1_baduanjin_23dof_suite.model_fields["mimic_policies"].default)
+    policies[0].policy_name = _SHOE_CUT1
+    policies[2].policy_name = _SHOE_CUT3
+    return policies
+
+
+@cfg_registry.register
+class g1_baduanjin_23dof_shoe_select(g1_baduanjin_23dof_select):
+    """Opt-in 23DoF shoe trial with independent segment selection."""
+    mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = _shoe_test_policies()
+    entry_pose_transition_by_policy_s: dict[str, float] = {_SHOE_CUT3: 5.0}
+    entry_target_blend_by_policy_s: dict[str, float] = {_SHOE_CUT3: 1.5}
+
+
+@cfg_registry.register
+class g1_baduanjin_23dof_shoe_suite(g1_baduanjin_23dof_suite):
+    """Opt-in 23DoF shoe trial with automatic sequencing."""
+    mimic_policies: list[G1BeyondMimic23DoFPolicyCfg] = _shoe_test_policies()

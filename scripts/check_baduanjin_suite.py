@@ -1,4 +1,5 @@
 """Check the fixed suite release without constructing an environment or SDK."""
+import argparse
 import hashlib
 import json
 import sys
@@ -20,30 +21,43 @@ MODELS = [
 ]
 
 
+SHOE_MODELS = [
+    ("cut1_i100_shoe_finish_20261121", 8627, "fe82202125cf990a8d2f9d15df02fe065f296b5643ff98585974bf9735bb43db"),
+    MODELS[1],
+    ("cut3_i5999_shoe_recover_20261121", 5299, "070dccd6413497700f9aa3e6b8af6735cb63f22da95f5fe722eaad3ab44f66d9"),
+]
+
+
 def require(ok, message):
     if not ok:
         raise SystemExit(message)
 
 
 def main():
-    cfg = ConfigManager("g1_baduanjin_23dof_suite").get_cfg()
-    manual = ConfigManager("g1_baduanjin_23dof_select").get_cfg()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--shoes", action="store_true", help="Validate the opt-in shoe trial")
+    shoes = parser.parse_args().shoes
+    stem = "g1_baduanjin_23dof_shoe" if shoes else "g1_baduanjin_23dof"
+    cfg = ConfigManager(f"{stem}_suite").get_cfg()
+    manual = ConfigManager(f"{stem}_select").get_cfg()
+    expected_models = SHOE_MODELS if shoes else MODELS
+    cut3_name = expected_models[2][0]
     require(cfg.auto_sequence and not manual.auto_sequence, "Automatic/manual entry mismatch")
     require(cfg.env.dof.num_dofs == 23 and cfg.env.odometry_type == "UNITREE", "23DoF/UNITREE contract mismatch")
     require(cfg.env.unitree.regular_fsm_id == 500, "This 23DoF release requires FSM request 500")
     require(not cfg.fixed_hip_bias.enabled, "Old hip correction must remain disabled")
     require((cfg.entry_pose_transition_s, cfg.segment_transition_s, cfg.exit_pose_transition_s) == (3., 3., 0.), "Transition config mismatch")
     require(manual.entry_pose_transition_s == 3.0 and
-            manual.entry_pose_transition_by_policy_s == {MODELS[2][0]: 5.0} and
+            manual.entry_pose_transition_by_policy_s == {cut3_name: 5.0} and
             not cfg.entry_pose_transition_by_policy_s, "Single Cut3 entry must be 5s")
-    require(manual.entry_target_blend_by_policy_s == {MODELS[2][0]: 1.5} and
+    require(manual.entry_target_blend_by_policy_s == {cut3_name: 1.5} and
             not cfg.entry_target_blend_by_policy_s, "Final target blend must be single Cut3 only")
     require(cfg.cut3_entry_settle_s == 3.0 and manual.cut3_entry_settle_s == 0.0,
             "Foot-position settling must be limited to the suite Cut3 transition")
-    require(len(cfg.mimic_policies) == len(MODELS), "Expected three models")
+    require(len(cfg.mimic_policies) == len(expected_models), "Expected three models")
     require(manual.mimic_policies == cfg.mimic_policies, "Manual and suite model lists differ")
     policies, results = [], []
-    for index, (entry, expected) in enumerate(zip(cfg.mimic_policies, MODELS)):
+    for index, (entry, expected) in enumerate(zip(cfg.mimic_policies, expected_models)):
         name, length, digest = expected
         require(entry.policy_name == name and entry.max_timestep == length, f"Wrong model/index at {index}")
         require(not entry.without_state_estimator, f"Changed input layout at {index}")

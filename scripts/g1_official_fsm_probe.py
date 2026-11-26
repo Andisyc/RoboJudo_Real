@@ -162,16 +162,28 @@ def stand_in_debug(env, guard, legs, check_storage, period, stance_tol, still_ve
     env.update()
     data = env.get_data()
     guard.state(data, env.safety_state_age())
-    goal = np.asarray(env.default_pos, dtype=float)
+    measured = np.asarray(data["dof_pos"], dtype=float)
+    default = np.asarray(env.default_pos, dtype=float)
     limits = np.asarray(env.position_limits, dtype=float)
-    error = np.abs(goal - data["dof_pos"])
-    if np.max(error[legs]) > stance_tol or np.max(error) > 0.35:
-        raise ProbeError(f"walk/run stance too far from default: leg={max(error[legs]):.3f}, "
-                         f"all={max(error):.3f} rad")
-    if (not np.isfinite(limits).all() or limits.shape != (len(goal), 2)
-            or not np.isfinite(goal).all()
-            or np.any(goal < limits[:, 0]) or np.any(goal > limits[:, 1])):
-        raise ProbeError("invalid configured default standing pose or joint limits")
+    if (default.shape != measured.shape or not np.isfinite(default).all()
+            or limits.shape != (len(measured), 2) or not np.isfinite(limits).all()):
+        raise ProbeError("invalid configured standing pose or joint limits")
+    error = np.abs(default - measured)
+    worst_stance = legs[int(np.argmax(error[legs]))]
+    if error[worst_stance] > stance_tol:
+        raise ProbeError(f"walk/run stance too far from default: "
+                         f"{env.joint_names[worst_stance]}={error[worst_stance]:.3f} rad")
+    # Native standing normally leaves the elbows bent. Retain the measured arm
+    # posture while blending the legs and waist toward the configured stance.
+    goal = measured.copy()
+    goal[legs] = default[legs]
+    invalid = np.flatnonzero((goal < limits[:, 0]) | (goal > limits[:, 1]))
+    if invalid.size:
+        raise ProbeError(f"standing target outside joint limits: {env.joint_names[invalid[0]]}")
+    worst_joint = int(np.argmax(error))
+    output("debug_stance_target", stance_max_error_rad=round(float(error[worst_stance]), 3),
+           max_default_delta_joint=env.joint_names[worst_joint],
+           max_default_delta_rad=round(float(error[worst_joint]), 3), arms="hold_measured")
     blend = EntryTargetBlend(list(env.joint_names), list(env.joint_names), data,
                              env.stiffness, samples, STAND_BLEND_SECONDS)
 
@@ -201,9 +213,11 @@ def stand_in_debug(env, guard, legs, check_storage, period, stance_tol, still_ve
         age = env.safety_state_age()
         quat = np.asarray(data["base_quat"], dtype=float)
         norm = np.linalg.norm(quat)
+        tracking_error = np.abs(goal - data["dof_pos"])
         if (not 0 <= age <= 0.1 or not 0.98 <= norm <= 1.02
                 or np.linalg.norm(quat[:2]) / norm > np.sin(np.deg2rad(5))
-                or np.max(np.abs(goal[legs] - data["dof_pos"][legs])) > 0.30):
+                or not np.isfinite(tracking_error).all()
+                or np.max(tracking_error[legs]) > 0.30 or np.max(tracking_error) > 0.35):
             raise ProbeError("debug stance out of bounds or LowState unavailable")
         sampled = now()
         env.step(target(data, sampled - entered))

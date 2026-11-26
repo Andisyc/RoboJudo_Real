@@ -220,6 +220,12 @@ class DebugStandingTest(unittest.TestCase):
         )
 
     def test_full_sequence_blends_then_holds_five_seconds_and_stops_publishing(self):
+        left_elbow = self.env.joint_names.index("left_elbow_joint")
+        right_elbow = self.env.joint_names.index("right_elbow_joint")
+        self.env.current[:13] = 0.061
+        self.env.current[left_elbow] = 0.824
+        self.env.current[right_elbow] = 0.784
+        starting_pose = self.env.current.copy()
         final_count = run_phase(
             self.env, "debug", stationary=lambda: (True, ""),
             check_storage=ignore_storage, still_seconds=1, wait_seconds=8,
@@ -233,8 +239,11 @@ class DebugStandingTest(unittest.TestCase):
         events = dict(self.events)
         self.assertGreaterEqual(events["debug_stand_hold_complete"]["hold_s"], 5)
         self.assertEqual(events["debug_handback_confirmed"]["publish_count"], final_count)
-        self.assertTrue((self.env.targets[-1] == self.env.default_pos).all())
-        self.assertLess(abs(self.env.targets[0][0] - 0.1), 0.06)
+        self.assertTrue((self.env.targets[-1][:13] == self.env.default_pos[:13]).all())
+        self.assertTrue(all((target[13:] == starting_pose[13:]).all()
+                            for target in self.env.targets))
+        self.assertEqual(events["debug_stance_target"]["max_default_delta_joint"], "left_elbow_joint")
+        self.assertLess(abs(self.env.targets[0][0] - starting_pose[0]), 0.06)
 
     def test_large_stance_error_never_enters_user_control(self):
         self.env.fsm = 801
@@ -248,6 +257,14 @@ class DebugStandingTest(unittest.TestCase):
         self.env.fsm = 801
         self.env.sensors_age = 0.2
         with self.assertRaisesRegex(SafetyViolation, "stale entry LowState"):
+            self.debug_stand()
+        self.assertEqual(self.env.commands, [])
+
+    def test_measured_arm_outside_limits_never_enters_user_control(self):
+        self.env.fsm = 801
+        elbow = self.env.joint_names.index("left_elbow_joint")
+        self.env.current[elbow] = 1.1
+        with self.assertRaisesRegex(ProbeError, "outside joint limits: left_elbow_joint"):
             self.debug_stand()
         self.assertEqual(self.env.commands, [])
 

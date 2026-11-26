@@ -1,4 +1,4 @@
-"""On-site mode switch diagnostic for the official G1 FSM 500 and 801."""
+"""On-site mode switch diagnostic for G1 official modes and optional debug standing."""
 
 import argparse
 from collections.abc import Callable
@@ -8,12 +8,16 @@ import hmac
 import json
 from pathlib import Path
 import re
+import signal
 import subprocess
 import time
 
 
 REGULAR = 500
 WALKRUN = 801
+DEBUG = 1000
+STAND_BLEND_SECONDS = 2.0
+STAND_HOLD_SECONDS = 5.0
 CYCLES = 5
 OBSERVE_SECONDS = 150
 ROOT_PORT = Path("/sys/bus/pci/devices/0004:00:00.0")
@@ -77,13 +81,14 @@ class StorageWatch:
             raise ProbeError(f"PCIe AER counters changed: before={self.baseline}, after={state}")
 
 
-def confirm_fsm(env, expected):
+def confirm_fsm(env, expected, *, allow_prior_publish=False):
     actual = env.sync_operator_fsm()
     status = env.get_control_status()
     if (status["authority_state"] != "INTERNAL" or status["publish_enabled"]
-            or status["active_publish_count"] != 0
+            or (not allow_prior_publish and status["active_publish_count"] != 0)
             or actual != expected):
         raise ProbeError(f"expected official FSM {expected}; read back {actual}, status={status}")
+    return status["active_publish_count"]
 
 
 def wait_ready(*, expected, entered, dwell, still, timeout, period,
@@ -105,9 +110,10 @@ def wait_ready(*, expected, entered, dwell, still, timeout, period,
     raise ProbeError(f"FSM {expected} did not meet still/dwell gate within {timeout}s: {reason}")
 
 
-def switch(env, source, target, entered, cycle, check_storage, now, output):
+def switch(env, source, target, entered, cycle, check_storage, now, output, *,
+           allow_prior_publish=False):
     check_storage(force=True)
-    confirm_fsm(env, source)
+    confirm_fsm(env, source, allow_prior_publish=allow_prior_publish)
     check_storage(force=True)
     send = (env.switch_regular_to_walkrun if target == WALKRUN
             else env.switch_walkrun_to_regular)
@@ -122,30 +128,172 @@ def switch(env, source, target, entered, cycle, check_storage, now, output):
     check_storage(force=True)
     if result != 0:
         raise ProbeError(f"official FSM request {source} → {target} failed: {result}")
-    confirm_fsm(env, target)
+    count = confirm_fsm(env, target, allow_prior_publish=allow_prior_publish)
     confirmed = now()
-    output("switch_confirmed", cycle=cycle, fsm=target, publish_count=0,
+    output("switch_confirmed", cycle=cycle, fsm=target, publish_count=count,
            elapsed_s=round(confirmed - started, 3))
     return confirmed
 
 
+def confirm_debug(env):
+    actual = env.sync_operator_fsm()
+    status = env.get_control_status()
+    if (actual != DEBUG or status["authority_state"] != "USER_ACTIVE"
+            or not status["publish_enabled"] or status["active_publish_count"] <= 0):
+        raise ProbeError(f"debug ownership not confirmed: read back {actual}, status={status}")
+    return status["active_publish_count"]
+
+
+def stand_in_debug(env, guard, legs, check_storage, period, stance_tol, still_vel, *,
+                   now=time.monotonic, sleep=time.sleep, output=emit):
+    import numpy as np
+    from robojudo.tools.entry_target_blend import EntryTargetBlend
+
+    confirm_fsm(env, WALKRUN)
+    samples = []
+    for _ in range(6):
+        check_storage()
+        env.update()
+        data = env.get_data()
+        guard.state(data, env.safety_state_age())
+        samples.append(env.measured_joint_torque())
+        sleep(period)
+    confirm_fsm(env, WALKRUN)
+    env.update()
+    data = env.get_data()
+    guard.state(data, env.safety_state_age())
+    goal = np.asarray(env.default_pos, dtype=float)
+    limits = np.asarray(env.position_limits, dtype=float)
+    error = np.abs(goal - data["dof_pos"])
+    if np.max(error[legs]) > stance_tol or np.max(error) > 0.35:
+        raise ProbeError(f"walk/run stance too far from default: leg={max(error[legs]):.3f}, "
+                         f"all={max(error):.3f} rad")
+    if (not np.isfinite(limits).all() or limits.shape != (len(goal), 2)
+            or not np.isfinite(goal).all()
+            or np.any(goal < limits[:, 0]) or np.any(goal > limits[:, 1])):
+        raise ProbeError("invalid configured default standing pose or joint limits")
+    blend = EntryTargetBlend(list(env.joint_names), list(env.joint_names), data,
+                             env.stiffness, samples, STAND_BLEND_SECONDS)
+
+    def target(state, elapsed):
+        value = np.clip(blend.target(goal, state, elapsed), limits[:, 0], limits[:, 1])
+        return guard.target(value, state["dof_pos"])
+
+    first = target(data, 0)
+    check_storage(force=True)
+    output("debug_request", source=WALKRUN, target=DEBUG)
+    result = env.acquire_user_control(first)
+    output("debug_acquire_result", result=result)
+    if result != 0:
+        raise ProbeError(f"debug acquire failed: {result}")
+    first_count = confirm_debug(env)
+    entered = now()
+    output("debug_confirmed", fsm=DEBUG, publish_count=first_count)
+    next_readback = entered + 0.5
+    holding_since = None
+    while True:
+        check_storage()
+        if now() >= next_readback:
+            confirm_debug(env)
+            next_readback = now() + 0.5
+        env.update()
+        data = env.get_data()
+        age = env.safety_state_age()
+        quat = np.asarray(data["base_quat"], dtype=float)
+        norm = np.linalg.norm(quat)
+        if (not 0 <= age <= 0.1 or not 0.98 <= norm <= 1.02
+                or np.linalg.norm(quat[:2]) / norm > np.sin(np.deg2rad(5))
+                or np.max(np.abs(goal[legs] - data["dof_pos"][legs])) > 0.30):
+            raise ProbeError("debug stance out of bounds or LowState unavailable")
+        sampled = now()
+        env.step(target(data, sampled - entered))
+        if sampled - entered >= STAND_BLEND_SECONDS:
+            if holding_since is None:
+                holding_since = sampled
+                output("debug_stand_hold_started", seconds=STAND_HOLD_SECONDS)
+            if sampled - holding_since >= STAND_HOLD_SECONDS:
+                break
+        sleep(period)
+
+    count = confirm_debug(env)
+    if count <= first_count:
+        raise ProbeError("debug publish count did not advance")
+    env.update()
+    data = env.get_data()
+    guard.state(data, env.safety_state_age())
+    if (np.max(np.abs(goal[legs] - data["dof_pos"][legs])) > stance_tol
+            or np.max(np.abs(data["dof_vel"][legs])) > still_vel):
+        raise ProbeError("debug stance not settled for handback")
+    output("debug_stand_hold_complete", hold_s=round(now() - holding_since, 3), publish_count=count)
+    check_storage(force=True)
+    output("debug_handback_request", source=DEBUG, target=WALKRUN)
+    result = env.release_to_walkrun()
+    output("debug_handback_result", result=result)
+    if result != 0:
+        raise ProbeError(f"debug handback to walk/run failed: {result}")
+    count = confirm_fsm(env, WALKRUN, allow_prior_publish=True)
+    output("debug_handback_confirmed", fsm=WALKRUN, publish_count=count, publish_enabled=False)
+    check_storage(force=True)
+    return count
+
+
+def wait_for_operator_if_active(env, *, sleep=time.sleep, output=emit):
+    """Keep the native bridge's last command until the handset takes over."""
+    def possibly_active(status):
+        return (status["publish_enabled"] or status["fsm_id"] == DEBUG
+                or status["authority_state"] in ("ACQUIRING", "USER_ACTIVE", "RELEASING"))
+
+    if not possibly_active(env.get_control_status()):
+        return
+    try:
+        output("debug_manual_takeover_required", status=env.get_control_status())
+    except (OSError, KeyboardInterrupt):
+        pass
+    while True:
+        try:
+            actual = env.sync_operator_fsm()
+            if actual >= 0 and actual != DEBUG and not possibly_active(env.get_control_status()):
+                try:
+                    output("debug_manual_takeover_confirmed", fsm=actual)
+                except OSError:
+                    pass
+                return
+        except (RuntimeError, KeyboardInterrupt):
+            pass
+        try:
+            sleep(0.5)
+        except KeyboardInterrupt:
+            # Repeated interrupts must not close an active bridge.
+            pass
+
+
 def run_phase(env, phase, *, stationary: Callable, check_storage: Callable,
               still_seconds, wait_seconds, period, observation_seconds=OBSERVE_SECONDS,
-              now=time.monotonic, sleep=time.sleep, output=emit):
+              debug_hold=None, now=time.monotonic, sleep=time.sleep, output=emit):
     dwell = 5.0 if phase == "paced" else 0.0
+    debug = phase == "debug"
+    if debug and debug_hold is None:
+        raise ProbeError("debug phase requires the standing hold")
+    cycles = 1 if debug else CYCLES
+    debug_publish_count = None
     check_storage(force=True)
     confirm_fsm(env, REGULAR)
     entered = now()
     gates = dict(timeout=wait_seconds, period=period, stationary=stationary,
                  check_storage=check_storage, now=now, sleep=sleep)
-    output("phase_started", phase=phase, cycles=CYCLES, dwell_s=dwell,
+    output("phase_started", phase=phase, cycles=cycles, dwell_s=dwell,
            still_seconds=still_seconds, still_timeout_s=wait_seconds)
-    for cycle in range(1, CYCLES + 1):
+    for cycle in range(1, cycles + 1):
         # Require a valid, still sample before entering walk/run.
         wait_ready(expected=REGULAR, entered=entered, dwell=dwell, still=0, **gates)
         entered = switch(env, REGULAR, WALKRUN, entered, cycle, check_storage, now, output)
+        if debug:
+            wait_ready(expected=WALKRUN, entered=entered, dwell=0, still=still_seconds, **gates)
+            debug_publish_count = debug_hold()
+            entered = now()
         wait_ready(expected=WALKRUN, entered=entered, dwell=dwell, still=still_seconds, **gates)
-        entered = switch(env, WALKRUN, REGULAR, entered, cycle, check_storage, now, output)
+        entered = switch(env, WALKRUN, REGULAR, entered, cycle, check_storage, now, output,
+                         allow_prior_publish=debug)
         output("cycle_complete", cycle=cycle)
 
     output("observation_started", seconds=observation_seconds)
@@ -154,7 +302,11 @@ def run_phase(env, phase, *, stationary: Callable, check_storage: Callable,
         check_storage()
         sleep(min(0.25, max(0, deadline - now())))
     check_storage(force=True)
-    confirm_fsm(env, REGULAR)
+    final_count = confirm_fsm(env, REGULAR, allow_prior_publish=debug)
+    if debug and final_count != debug_publish_count:
+        raise ProbeError(f"publish count changed after debug handback: "
+                         f"{debug_publish_count} → {final_count}")
+    return final_count
 
 
 def confirm_host(machine_id_sha256):
@@ -194,7 +346,7 @@ def execute(phase, machine_id_sha256):
     cfg = g1_baduanjin_23dof_suite.model_fields["env"].default.model_copy(deep=True)
     if cfg.dof.num_dofs != 23 or cfg.unitree.regular_fsm_id != REGULAR:
         raise ProbeError("installed suite does not have the expected 23DoF/FSM500 environment")
-    cfg.act = False
+    cfg.act = phase == "debug"
     token = g1_loco_bridge.ControllerAuthority()
     if result := token.acquire():
         raise ProbeError(f"controller lock unavailable: {result}")
@@ -218,21 +370,37 @@ def execute(phase, machine_id_sha256):
             speed = max(abs(data["dof_vel"][i]) for i in legs)
             return speed <= pipeline.REGULAR_STILL_VEL, f"max leg/waist speed {speed:.3f} rad/s"
 
-        run_phase(env, phase, stationary=stationary, check_storage=storage.check,
-                  still_seconds=pipeline.REGULAR_STILL_S, wait_seconds=pipeline.REGULAR_WAIT_S,
-                  period=cfg.unitree.control_dt)
+        debug_hold = None
+        if phase == "debug":
+            def debug_hold():
+                return stand_in_debug(env, guard, legs, storage.check, cfg.unitree.control_dt,
+                                      pipeline.POSE_STANDING_LEG_TOL, pipeline.REGULAR_STILL_VEL)
+
+        count = run_phase(env, phase, stationary=stationary, check_storage=storage.check,
+                          still_seconds=pipeline.REGULAR_STILL_S, wait_seconds=pipeline.REGULAR_WAIT_S,
+                          period=cfg.unitree.control_dt, debug_hold=debug_hold)
         if result := env.end_control_session():
             raise ProbeError(f"control session end failed: {result}")
+    except (Exception, KeyboardInterrupt) as exc:
+        if phase == "debug":
+            try:
+                emit("debug_aborting", error=repr(exc))
+            except (OSError, KeyboardInterrupt):
+                pass
+        raise
     finally:
+        if phase == "debug":
+            wait_for_operator_if_active(env)
         # Native close() only shuts down local resources. It never sets an FSM.
         if result := env.shutdown():
             raise ProbeError(f"controller shutdown failed: {result}; check mode with handset")
-    emit("phase_passed", phase=phase, cycles=CYCLES, publish_count=0, final_fsm=REGULAR)
+    emit("phase_passed", phase=phase, cycles=1 if phase == "debug" else CYCLES,
+         publish_count=count, final_fsm=REGULAR)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=("fast", "paced"), required=True)
+    parser.add_argument("--phase", choices=("fast", "paced", "debug"), required=True)
     parser.add_argument("--machine-id-sha256", required=True,
                         help="SHA-256 of the verified target's machine-id without newline")
     parser.add_argument("--execute", action="store_true", help="allow on-site FSM requests")
@@ -241,6 +409,11 @@ def main():
         parser.error("on-site execution requires --execute")
     if not re.fullmatch(r"[a-f0-9]{64}", args.machine_id_sha256):
         parser.error("--machine-id-sha256 must be a lowercase SHA-256 digest")
+    if args.phase == "debug":
+        def stop(_signum, _frame):
+            raise KeyboardInterrupt("operator or terminal requested stop")
+        signal.signal(signal.SIGHUP, stop)
+        signal.signal(signal.SIGTERM, stop)
     try:
         execute(args.phase, args.machine_id_sha256)
     except (Exception, KeyboardInterrupt) as exc:
